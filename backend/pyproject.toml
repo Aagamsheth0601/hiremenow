@@ -1,0 +1,46 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "hiremenow backend — FastAPI service for resume-driven YC scraping, contact resolution, and outreach drafting."
+readme = "README.md"
+authors = [
+    { name = "Aagamsheth0601", email = "aagamsheth0601@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "alembic>=1.18.4",
+    "anthropic>=0.100.0",
+    "beautifulsoup4>=4.14.3",
+    "fastapi>=0.136.1",
+    "google-api-python-client>=2.195.0",
+    "google-auth-httplib2>=0.3.1",
+    "google-auth-oauthlib>=1.3.1",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.14.0",
+    "pypdf>=6.10.2",
+    "python-docx>=1.2.0",
+    "python-dotenv>=1.2.2",
+    "sqlmodel>=0.0.38",
+    "uvicorn[standard]>=0.46.0",
+]
+
+[project.scripts]
+backend = "backend.main:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.6",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[build-system]
+requires = ["uv_build>=0.11.10,<0.12.0"]
+build-backend = "uv_build"
