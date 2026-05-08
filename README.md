@@ -11,7 +11,7 @@ Personal job-hunt automation. Given a resume, hiremenow:
 
 ```
 hiremenow/
-├── frontend/   # Next.js 15 (App Router, TypeScript, Tailwind, shadcn/ui)
+├── frontend/   # Vite + React 18 (TypeScript, Tailwind v4)
 ├── backend/    # Python 3.10+ (FastAPI, SQLModel, uv)
 ├── .env.example
 └── .gitignore
@@ -43,9 +43,9 @@ API docs: `http://127.0.0.1:8000/docs`
 ```bash
 cd frontend
 npm install                # one-time
-npm run dev                # Next.js on http://localhost:3000
+npm run dev                # Vite on http://localhost:5173
 ```
 
 ## Status
 
-Scaffolding complete. Feature 1 (resume ingestion) up next.
+Resume ingestion (Feature 1) wired end-to-end — PDF upload, pypdf text extraction, Claude structured field extraction, SQLite store, and a parsed-fields preview in the UI.

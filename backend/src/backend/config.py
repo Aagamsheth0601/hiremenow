@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./hiremenow.db"
 
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:5173"
 
     anthropic_api_key: str = ""
 
