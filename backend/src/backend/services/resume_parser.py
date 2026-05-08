@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import io
+import json
 
-import anthropic
 import pypdf
-from pydantic import BaseModel, Field
+from openai import OpenAI
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.config import get_settings
 
@@ -41,11 +42,16 @@ class ParsedResume(BaseModel):
     years_experience: float | None = None
 
 
-SYSTEM_PROMPT = """You extract structured fields from resume text. Be faithful to the source — do not invent information that is not present. Leave fields empty/null when the resume does not contain them.
+SYSTEM_PROMPT_TEMPLATE = """You extract structured fields from resume text. Be faithful to the source — do not invent information that is not present. Leave fields empty/null when the resume does not contain them.
 
 For `years_experience`, estimate total professional experience in years (a single number, can be fractional). If only roles with date ranges are present, sum the durations. Return null if not derivable.
 
-For `skills`, list concrete technical skills, tools, languages, and frameworks the candidate claims. Skip soft skills."""
+For `skills`, list concrete technical skills, tools, languages, and frameworks the candidate claims. Skip soft skills.
+
+Return ONLY a single JSON object matching this schema. No prose, no markdown fences, no commentary.
+
+Schema:
+{schema}"""
 
 
 class ResumeParseError(Exception):
@@ -71,28 +77,70 @@ def extract_text(pdf_bytes: bytes) -> str:
     return text
 
 
+def _extract_json_block(content: str) -> str | None:
+    start = content.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start : i + 1]
+    return None
+
+
+def _parse_response(content: str) -> ParsedResume:
+    try:
+        return ParsedResume.model_validate(json.loads(content))
+    except (json.JSONDecodeError, ValidationError):
+        pass
+
+    block = _extract_json_block(content)
+    if block is None:
+        raise ResumeParseError("Model response did not contain a JSON object.")
+    try:
+        return ParsedResume.model_validate(json.loads(block))
+    except (json.JSONDecodeError, ValidationError) as e:
+        raise ResumeParseError(f"Model returned invalid JSON: {e}") from e
+
+
 def extract_fields(text: str) -> ParsedResume:
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise ResumeParseError("ANTHROPIC_API_KEY is not configured.")
+    if not settings.openrouter_api_key:
+        raise ResumeParseError("OPENROUTER_API_KEY is not configured.")
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    response = client.messages.parse(
-        model="claude-opus-4-7",
-        max_tokens=16000,
-        thinking={"type": "adaptive"},
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Extract structured fields from this resume:\n\n<resume>\n{text}\n</resume>",
-            }
-        ],
-        output_format=ParsedResume,
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
     )
 
-    return response.parsed_output
+    schema = json.dumps(ParsedResume.model_json_schema(), indent=2)
+    system = SYSTEM_PROMPT_TEMPLATE.replace("{schema}", schema)
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.resume_parser_model,
+            messages=[
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": f"Extract structured fields from this resume:\n\n<resume>\n{text}\n</resume>",
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            max_tokens=4096,
+        )
+    except Exception as e:
+        raise ResumeParseError(f"OpenRouter request failed: {e}") from e
+
+    content = (response.choices[0].message.content or "").strip()
+    if not content:
+        raise ResumeParseError("Model returned empty response.")
+    return _parse_response(content)
 
 
 def parse_pdf(pdf_bytes: bytes) -> tuple[str, ParsedResume]:

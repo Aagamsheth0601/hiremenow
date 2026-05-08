@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
 
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    resume_parser_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
