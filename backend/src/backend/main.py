@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import get_settings
 from backend.db import init_db
-from backend.routers import resumes
+from backend.routers import preferences, resumes
 
 settings = get_settings()
 
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(resumes.router)
+app.include_router(preferences.router)
 
 
 @app.get("/health")
