@@ -36,3 +36,31 @@ def trigger_scrape(
 def jobs_count(session: Session = Depends(get_session)) -> dict:
     total = session.exec(select(func.count(Job.id))).one()
     return {"total": total}
+
+
+@router.get("")
+def list_jobs(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    rows = session.exec(
+        select(Job).order_by(Job.scraped_at.desc()).offset(offset).limit(limit)
+    ).all()
+    return [
+        {
+            "id": j.id,
+            "title": j.title,
+            "company_name": j.company_name,
+            "company_one_liner": j.company_one_liner,
+            "company_industry": j.company_industry,
+            "company_stage": j.company_stage,
+            "company_batch": j.company_batch,
+            "company_website": j.company_website,
+            "locations": j.locations,
+            "tags": j.tags,
+            "source_url": j.source_url,
+            "scraped_at": j.scraped_at.isoformat(),
+        }
+        for j in rows
+    ]
