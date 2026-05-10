@@ -29,6 +29,7 @@ export type ParsedResume = {
   experience: Experience[];
   education: Education[];
   years_experience?: number | null;
+  suggested_target_roles?: string[];
 };
 
 export type UploadResponse = {
@@ -48,3 +49,52 @@ export type Preferences = {
   has_saved: boolean;
   updated_at: string | null;
 };
+
+export type Job = {
+  id: number;
+  title: string;
+  company_name: string;
+  company_one_liner: string | null;
+  company_industry: string | null;
+  company_stage: string | null;
+  company_batch: string | null;
+  company_website: string | null;
+  locations: string[];
+  tags: string[];
+  founders: Founder[];
+  contact_emails: string[];
+  source_url: string;
+  scraped_at: string;
+  match_score?: number;
+};
+
+export type ScrapeResult = {
+  companies_visited: number;
+  jobs_seen: number;
+  jobs_inserted: number;
+  jobs_updated: number;
+  errors: number;
+  total_jobs_in_db: number;
+};
+
+export type Founder = {
+  name: string;
+  linkedin_url: string;
+  twitter_url: string | null;
+};
+
+export type EmailDraft = {
+  kind: "email";
+  subject: string;
+  body: string;
+  recipients: string[];
+  founders: Founder[];
+};
+
+export type LinkedInDraft = {
+  kind: "linkedin";
+  message: string;
+  founders: Founder[];
+};
+
+export type OutreachDraft = EmailDraft | LinkedInDraft;

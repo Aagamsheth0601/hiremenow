@@ -280,6 +280,8 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
   const [workModes, setWorkModes] = useState<string[]>([]);
   const [companySizes, setCompanySizes] = useState<string[]>([]);
   const [needsVisa, setNeedsVisa] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -319,6 +321,26 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
       .split(",")
       .map((x) => x.trim())
       .filter(Boolean);
+
+  const onSuggestRoles = async () => {
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/preferences/suggest-roles`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `Suggest failed (${res.status})`);
+      }
+      const data: { target_roles: string[] } = await res.json();
+      setRolesInput(data.target_roles.join(", "));
+    } catch (err) {
+      setSuggestError(err instanceof Error ? err.message : "Suggest failed");
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const toggle = (list: string[], value: string) =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -371,13 +393,31 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
       ) : (
         <form onSubmit={onSave} className="flex flex-col gap-5">
           <Field label="Target roles (comma-separated)">
-            <input
-              type="text"
-              value={rolesInput}
-              onChange={(e) => setRolesInput(e.target.value)}
-              placeholder="Software Engineer, ML Engineer"
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
-            />
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                value={rolesInput}
+                onChange={(e) => setRolesInput(e.target.value)}
+                placeholder="Software Engineer, ML Engineer"
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={onSuggestRoles}
+                  disabled={suggesting}
+                  className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {suggesting ? "Inferring…" : "Suggest from resume"}
+                </button>
+                <span className="text-xs text-zinc-500">
+                  Replaces the field with LLM-derived industry titles based on your skills + experience.
+                </span>
+              </div>
+              {suggestError && (
+                <p className="text-xs text-red-700">{suggestError}</p>
+              )}
+            </div>
           </Field>
 
           <Field label="Seniority">

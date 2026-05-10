@@ -23,7 +23,17 @@ ALGOLIA_SEARCH_KEY = (
 )
 ALGOLIA_INDEX = "YCCompany_production"
 USER_AGENT = "hiremenow/0.1 (+personal job-hunt tool; public-data only)"
-REQUEST_DELAY_SECONDS = 0.5
+REQUEST_DELAY_SECONDS = 0.75
+
+REGION_FILTERS: dict[str, str] = {
+    "us": "United States of America",
+    "india": "India",
+}
+HTTP_LIMITS = httpx.Limits(
+    max_keepalive_connections=5,
+    max_connections=10,
+    keepalive_expiry=30.0,
+)
 
 
 @dataclass
@@ -35,22 +45,47 @@ class ScrapeStats:
     errors: int = 0
 
 
-def _algolia_search_hiring(client: httpx.Client, hits_per_page: int) -> list[dict[str, Any]]:
+def _algolia_search_hiring(
+    client: httpx.Client,
+    *,
+    hits_per_page: int,
+    region: str | None = None,
+) -> list[dict[str, Any]]:
     url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
     headers = {
         "X-Algolia-API-Key": ALGOLIA_SEARCH_KEY,
         "X-Algolia-Application-Id": ALGOLIA_APP_ID,
         "Content-Type": "application/json",
     }
+    facet_filters: list[Any] = ["isHiring:true"]
+    fetch_count = hits_per_page
+    region_term: str | None = None
+    if region:
+        region_term = REGION_FILTERS.get(region.lower())
+        if region_term:
+            facet_filters.append(f"regions:{region_term}")
+            fetch_count = max(hits_per_page * 3, hits_per_page)
+
     body = {
         "query": "",
-        "hitsPerPage": hits_per_page,
+        "hitsPerPage": fetch_count,
         "page": 0,
-        "facetFilters": ["isHiring:true"],
+        "facetFilters": facet_filters,
     }
     r = client.post(url, headers=headers, json=body, timeout=15.0)
     r.raise_for_status()
-    return r.json().get("hits", [])
+    hits = r.json().get("hits", [])
+
+    if region_term:
+        needle = region_term.lower()
+        country_short = "united states" if needle.startswith("united states") else needle
+        filtered = [
+            h for h in hits
+            if country_short in (h.get("all_locations") or "").lower()
+            or country_short in " ".join(h.get("regions") or []).lower()
+        ]
+        hits = filtered or hits
+    return hits[:hits_per_page]
 
 
 def _fetch(client: httpx.Client, url: str) -> str | None:
@@ -61,6 +96,126 @@ def _fetch(client: httpx.Client, url: str) -> str | None:
     except httpx.HTTPError as e:
         log.warning("fetch failed %s: %s", url, e)
         return None
+
+
+def _parse_company_founders(html: str) -> list[dict[str, Any]]:
+    soup = BeautifulSoup(html, "html.parser")
+    founders: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for a in soup.select('a[href*="linkedin.com/in/"]'):
+        href = (a.get("href") or "").strip()
+        if not href or href in seen:
+            continue
+        seen.add(href)
+
+        name: str | None = None
+        node = a
+        for _ in range(6):
+            node = node.parent
+            if node is None:
+                break
+            for h in node.find_all(["h1", "h2", "h3", "h4", "strong"], limit=4):
+                t = h.get_text(strip=True)
+                if t and 2 < len(t) < 60 and not t.lower().startswith("active "):
+                    name = t
+                    break
+            if name:
+                break
+
+        twitter_url: str | None = None
+        anchor_parent = a.parent
+        if anchor_parent is not None:
+            tw = anchor_parent.find(
+                "a",
+                href=lambda h: bool(h)
+                and ("twitter.com/" in h or "x.com/" in h),
+            )
+            if tw:
+                twitter_url = tw.get("href")
+
+        founders.append({
+            "name": name or "Founder",
+            "linkedin_url": href,
+            "twitter_url": twitter_url,
+        })
+
+    return founders[:6]
+
+
+_EMAIL_PATHS = ("", "/careers", "/contact", "/about", "/jobs")
+_EMAIL_PRIORITY = ("careers@", "jobs@", "hiring@", "recruit@", "talent@",
+                   "founders@", "hello@", "contact@", "team@", "info@")
+
+
+def _discover_emails(client: httpx.Client, website: str | None) -> list[str]:
+    if not website:
+        return []
+    if not website.startswith(("http://", "https://")):
+        website = "https://" + website
+    base = website.rstrip("/")
+    found: set[str] = set()
+    for path in _EMAIL_PATHS:
+        url = base + path
+        try:
+            r = client.get(url, timeout=8.0, follow_redirects=True)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            for a in soup.select('a[href^="mailto:"]'):
+                raw = (a.get("href") or "").replace("mailto:", "").split("?")[0]
+                email = raw.strip().lower()
+                if not email or "@" not in email:
+                    continue
+                local, _, domain = email.partition("@")
+                if not local or "." not in domain:
+                    continue
+                if email.endswith(("@example.com", "@test.com", "@sentry.io")):
+                    continue
+                if domain.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg")):
+                    continue
+                found.add(email)
+        except (httpx.HTTPError, Exception) as e:
+            log.debug("email discovery failed for %s: %s", url, e)
+            continue
+        time.sleep(0.3)
+
+    primary = sorted(e for e in found if e.startswith(_EMAIL_PRIORITY))
+    rest = sorted(e for e in found if not e.startswith(_EMAIL_PRIORITY))
+    return (primary + rest)[:5]
+
+
+def enrich_company_for_job(
+    session: Session, job: Job, *, force: bool = False
+) -> Job:
+    needs_founders = force or not (job.founders or [])
+    needs_emails = force or not (job.contact_emails or [])
+    if not needs_founders and not needs_emails:
+        return job
+
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Connection": "keep-alive",
+    }
+    with httpx.Client(
+        headers=headers,
+        follow_redirects=True,
+        limits=HTTP_LIMITS,
+    ) as client:
+        if needs_founders and job.company_slug:
+            company_url = f"{YC_BASE}/companies/{job.company_slug}"
+            html = _fetch(client, company_url)
+            time.sleep(REQUEST_DELAY_SECONDS)
+            if html:
+                job.founders = _parse_company_founders(html)
+        if needs_emails:
+            job.contact_emails = _discover_emails(client, job.company_website)
+
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return job
 
 
 def _parse_company_jobs(html: str, company_slug: str) -> list[str]:
@@ -142,6 +297,8 @@ def _upsert_job(
         company_batch=company.get("batch"),
         locations=locations,
         tags=company.get("tags") or [],
+        founders=company.get("_founders") or [],
+        contact_emails=company.get("_contact_emails") or [],
         updated_at=now,
     )
 
@@ -160,13 +317,25 @@ def scrape_yc_jobs(
     *,
     company_limit: int = 10,
     job_limit_per_company: int = 10,
+    region: str | None = None,
 ) -> ScrapeStats:
     stats = ScrapeStats()
-    headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Connection": "keep-alive",
+    }
 
-    with httpx.Client(headers=headers, follow_redirects=True) as client:
+    with httpx.Client(
+        headers=headers,
+        follow_redirects=True,
+        limits=HTTP_LIMITS,
+        http2=False,
+    ) as client:
         try:
-            companies = _algolia_search_hiring(client, hits_per_page=company_limit)
+            companies = _algolia_search_hiring(
+                client, hits_per_page=company_limit, region=region
+            )
         except httpx.HTTPError as e:
             log.error("algolia search failed: %s", e)
             stats.errors += 1
@@ -184,6 +353,11 @@ def scrape_yc_jobs(
             if html is None:
                 stats.errors += 1
                 continue
+
+            company_founders = _parse_company_founders(html)
+            company_emails = _discover_emails(client, company.get("website"))
+            company["_founders"] = company_founders
+            company["_contact_emails"] = company_emails
 
             job_paths = _parse_company_jobs(html, slug)[:job_limit_per_company]
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
@@ -31,6 +32,9 @@ class Job(SQLModel, table=True):
 
     locations: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+    founders: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    contact_emails: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     scraped_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

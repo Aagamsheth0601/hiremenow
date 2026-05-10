@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from backend.db import get_session
@@ -38,6 +39,7 @@ async def upload_resume(
         filename=file.filename or "resume.pdf",
         raw_text=raw_text,
         parsed=parsed.model_dump(),
+        pdf_bytes=pdf_bytes,
     )
     session.add(resume)
     session.commit()
@@ -49,6 +51,27 @@ async def upload_resume(
         "uploaded_at": resume.uploaded_at.isoformat(),
         "parsed": resume.parsed,
     }
+
+
+@router.get("/latest/pdf")
+def latest_resume_pdf(session: Session = Depends(get_session)) -> Response:
+    resume = session.exec(
+        select(Resume).order_by(Resume.uploaded_at.desc())
+    ).first()
+    if resume is None:
+        raise HTTPException(status_code=404, detail="No resume uploaded.")
+    if not resume.pdf_bytes:
+        raise HTTPException(
+            status_code=410,
+            detail="Resume was uploaded before PDF storage was enabled. Re-upload to download.",
+        )
+    return Response(
+        content=resume.pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{resume.filename}"',
+        },
+    )
 
 
 @router.get("")

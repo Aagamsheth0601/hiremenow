@@ -8,6 +8,11 @@ from sqlmodel import Session, select
 
 from backend.db import get_session
 from backend.models import JobPreferences, Resume
+from backend.services.resume_parser import (
+    ParsedResume,
+    ResumeParseError,
+    suggest_target_roles,
+)
 
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
@@ -53,18 +58,24 @@ def _prefill_from_resume(session: Session) -> PreferencesPayload:
     contact = parsed.get("contact") or {}
     experience = parsed.get("experience") or []
 
-    titles: list[str] = []
-    for exp in experience:
-        title = (exp or {}).get("title")
-        if title and title not in titles:
-            titles.append(title)
-    titles = titles[:5]
+    suggested = parsed.get("suggested_target_roles") or []
+    target_roles: list[str] = []
+    for role in suggested:
+        if isinstance(role, str) and role.strip() and role not in target_roles:
+            target_roles.append(role.strip())
+
+    if not target_roles:
+        for exp in experience:
+            title = (exp or {}).get("title")
+            if title and title not in target_roles:
+                target_roles.append(title)
+    target_roles = target_roles[:7]
 
     location = (contact.get("location") or "").strip()
     locations = [location] if location else []
 
     return PreferencesPayload(
-        target_roles=titles,
+        target_roles=target_roles,
         seniority=_seniority_from_years(parsed.get("years_experience")),
         locations=locations,
         work_modes=[],
@@ -125,6 +136,33 @@ def upsert_preferences(
     session.refresh(prefs)
 
     return _to_response(prefs, PreferencesPayload())
+
+
+@router.post("/suggest-roles")
+def suggest_roles(session: Session = Depends(get_session)) -> dict[str, list[str]]:
+    resume = session.exec(select(Resume).order_by(Resume.uploaded_at.desc())).first()
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload a resume first.",
+        )
+    try:
+        parsed = ParsedResume.model_validate(resume.parsed or {})
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Stored resume is malformed: {e}",
+        ) from e
+
+    try:
+        roles = suggest_target_roles(parsed)
+    except ResumeParseError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e),
+        ) from e
+
+    return {"target_roles": roles}
 
 
 @router.get("/options")
