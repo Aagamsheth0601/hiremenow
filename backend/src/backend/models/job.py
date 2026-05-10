@@ -36,5 +36,9 @@ class Job(SQLModel, table=True):
     founders: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     contact_emails: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
+    application_status: str | None = Field(default=None, index=True)
+    status_updated_at: datetime | None = Field(default=None)
+    is_starred: bool = Field(default=False, index=True)
+
     scraped_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

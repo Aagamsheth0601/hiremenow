@@ -29,6 +29,12 @@ def _ensure_columns() -> None:
             conn.execute(text("ALTER TABLE jobs ADD COLUMN founders JSON"))
         if "contact_emails" not in job_cols:
             conn.execute(text("ALTER TABLE jobs ADD COLUMN contact_emails JSON"))
+        if "application_status" not in job_cols:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN application_status TEXT"))
+        if "status_updated_at" not in job_cols:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN status_updated_at TIMESTAMP"))
+        if "is_starred" not in job_cols:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN is_starred BOOLEAN DEFAULT 0"))
 
 
 def init_db() -> None:

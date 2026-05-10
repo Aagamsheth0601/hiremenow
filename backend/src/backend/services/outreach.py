@@ -153,6 +153,73 @@ def _call_llm(system: str, user: str, *, max_tokens: int) -> dict:
             ) from e
 
 
+def _email_template_fallback(job: Job, resume: Resume) -> EmailDraft:
+    parsed = resume.parsed or {}
+    contact = parsed.get("contact") or {}
+    name = (contact.get("name") or "").strip()
+    skills = [s for s in (parsed.get("skills") or []) if isinstance(s, str)][:4]
+    years = parsed.get("years_experience")
+
+    founder_first = None
+    if job.founders:
+        first = next(
+            (f for f in job.founders if isinstance(f, dict) and f.get("name")),
+            None,
+        )
+        if first:
+            founder_first = first["name"].split()[0]
+
+    greeting = (
+        f"Hi {founder_first},"
+        if founder_first
+        else f"Hi {job.company_name} team,"
+    )
+
+    first_name = name.split()[0] if name else "I"
+    role = job.title or "the role"
+    subject = (
+        f"{first_name} — interested in the {role} role at {job.company_name}"
+        if name
+        else f"Interested in the {role} role at {job.company_name}"
+    )
+
+    one_liner = (job.company_one_liner or "").strip().rstrip(".")
+    intro = (
+        f"I came across your {role} posting and wanted to reach out — "
+        f"the work you're doing on {one_liner} resonated with me."
+        if one_liner
+        else f"I came across your {role} posting at {job.company_name} and wanted to reach out."
+    )
+
+    skill_pitch = ""
+    if skills:
+        skill_list = ", ".join(skills[:3])
+        if isinstance(years, (int, float)) and years > 0:
+            skill_pitch = (
+                f"I bring around {int(years)} years of experience with a stack "
+                f"centered on {skill_list}, which feels aligned with what you're building."
+            )
+        else:
+            skill_pitch = (
+                f"My recent work centers on {skill_list}, which feels closely "
+                f"aligned with what you're building."
+            )
+
+    cta = (
+        "Would you have 15 minutes to chat about how I could contribute? "
+        "Happy to share more — resume attached."
+    )
+
+    sign = f"— {name}" if name else "— [Your Name]"
+
+    body_parts = [greeting, "", intro]
+    if skill_pitch:
+        body_parts.extend(["", skill_pitch])
+    body_parts.extend(["", cta, "", sign])
+
+    return EmailDraft(subject=subject, body="\n".join(body_parts))
+
+
 def draft_email(job: Job, resume: Resume) -> EmailDraft:
     founders_line = ""
     if job.founders:
@@ -164,11 +231,22 @@ def draft_email(job: Job, resume: Resume) -> EmailDraft:
         f"{_resume_context(resume)}\n\n--- TARGET JOB ---\n{_job_context(job)}{founders_line}\n\n"
         "Write the outreach email."
     )
-    data = _call_llm(_EMAIL_SYSTEM, user, max_tokens=900)
     try:
-        return EmailDraft.model_validate(data)
-    except ValidationError as e:
-        raise OutreachError(f"Email draft missing fields: {e}") from e
+        data = _call_llm(_EMAIL_SYSTEM, user, max_tokens=900)
+        try:
+            email = EmailDraft.model_validate(data)
+            if (
+                email.subject
+                and len(email.subject.strip()) >= 5
+                and len(email.body.strip()) >= 200
+            ):
+                return email
+        except ValidationError:
+            pass
+    except OutreachError:
+        pass
+
+    return _email_template_fallback(job, resume)
 
 
 def _linkedin_template(job: Job, resume: Resume) -> str:

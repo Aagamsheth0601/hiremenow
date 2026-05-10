@@ -185,6 +185,54 @@ def _discover_emails(client: httpx.Client, website: str | None) -> list[str]:
     return (primary + rest)[:5]
 
 
+def _enrich_one(client: httpx.Client, job: Job, *, force: bool) -> bool:
+    needs_founders = force or not (job.founders or [])
+    needs_emails = force or not (job.contact_emails or [])
+    if not needs_founders and not needs_emails:
+        return False
+    if needs_founders and job.company_slug:
+        company_url = f"{YC_BASE}/companies/{job.company_slug}"
+        html = _fetch(client, company_url)
+        time.sleep(REQUEST_DELAY_SECONDS)
+        if html:
+            job.founders = _parse_company_founders(html)
+    if needs_emails:
+        job.contact_emails = _discover_emails(client, job.company_website)
+    return True
+
+
+def enrich_jobs_batch(
+    session: Session, jobs: list[Job], *, force: bool = False
+) -> dict[int, dict[str, Any]]:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Connection": "keep-alive",
+    }
+    results: dict[int, dict[str, Any]] = {}
+    if not jobs:
+        return results
+    with httpx.Client(
+        headers=headers,
+        follow_redirects=True,
+        limits=HTTP_LIMITS,
+    ) as client:
+        for job in jobs:
+            try:
+                changed = _enrich_one(client, job, force=force)
+            except Exception as e:
+                log.warning("enrich failed for job %s: %s", job.id, e)
+                continue
+            if changed:
+                session.add(job)
+                results[job.id] = {
+                    "founders": job.founders or [],
+                    "contact_emails": job.contact_emails or [],
+                }
+        session.commit()
+    return results
+
+
 def enrich_company_for_job(
     session: Session, job: Job, *, force: bool = False
 ) -> Job:

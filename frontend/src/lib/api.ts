@@ -50,9 +50,18 @@ export type Preferences = {
   updated_at: string | null;
 };
 
+export type ApplicationStatus =
+  | "reached_out"
+  | "applied"
+  | "replied"
+  | "rejected";
+
+export type StatusFilter = "active" | ApplicationStatus | "starred" | "all";
+
 export type Job = {
   id: number;
   title: string;
+  description: string;
   company_name: string;
   company_one_liner: string | null;
   company_industry: string | null;
@@ -63,10 +72,16 @@ export type Job = {
   tags: string[];
   founders: Founder[];
   contact_emails: string[];
+  application_status: ApplicationStatus | null;
+  status_updated_at: string | null;
+  is_starred: boolean;
+  draft_kinds: string[];
   source_url: string;
   scraped_at: string;
   match_score?: number;
 };
+
+export type StatusCounts = Record<StatusFilter, number>;
 
 export type ScrapeResult = {
   companies_visited: number;

@@ -1,14 +1,62 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
   BACKEND_URL,
+  type ApplicationStatus,
   type EmailDraft,
   type Job,
   type LinkedInDraft,
   type Preferences,
   type ScrapeResult,
+  type StatusCounts,
+  type StatusFilter,
 } from "../lib/api";
+
+const STATUS_OPTIONS: { value: ApplicationStatus; label: string; color: string }[] = [
+  { value: "reached_out", label: "Reached out", color: "bg-amber-100 text-amber-800" },
+  { value: "applied", label: "Applied", color: "bg-blue-100 text-blue-800" },
+  { value: "replied", label: "Replied", color: "bg-purple-100 text-purple-800" },
+  { value: "rejected", label: "Rejected", color: "bg-zinc-200 text-zinc-700" },
+];
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "starred", label: "Starred" },
+  { value: "reached_out", label: "Reached out" },
+  { value: "applied", label: "Applied" },
+  { value: "replied", label: "Replied" },
+  { value: "rejected", label: "Rejected" },
+  { value: "all", label: "All" },
+];
+
+function StarIcon({
+  filled,
+  className = "",
+}: {
+  filled: boolean;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? "#F59E0B" : "none"}
+      stroke={filled ? "#F59E0B" : "currentColor"}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+function statusMeta(status: ApplicationStatus | null) {
+  if (!status) return null;
+  return STATUS_OPTIONS.find((o) => o.value === status) ?? null;
+}
 
 type DraftKind = "email" | "linkedin";
 type DraftState =
@@ -38,22 +86,78 @@ export default function JobsPage() {
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [region, setRegion] = useState<"india" | "us">("india");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [counts, setCounts] = useState<StatusCounts | null>(null);
+  const enrichRequestedRef = useRef<Set<number>>(new Set());
 
-  const loadJobs = useCallback(async (regionParam: "india" | "us") => {
-    setJobsLoading(true);
+  const loadCounts = useCallback(async (regionParam: "india" | "us") => {
     try {
       const res = await fetch(
-        `${BACKEND_URL}/jobs?limit=200&region=${regionParam}`,
+        `${BACKEND_URL}/jobs/status-counts?region=${regionParam}`,
       );
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data: Job[] = await res.json();
-      setJobs(data);
+      if (!res.ok) return;
+      setCounts((await res.json()) as StatusCounts);
     } catch (err) {
-      console.error("failed to load jobs", err);
-    } finally {
-      setJobsLoading(false);
+      console.error("failed to load status counts", err);
     }
   }, []);
+
+  const loadJobs = useCallback(
+    async (regionParam: "india" | "us", statusParam: StatusFilter) => {
+      setJobsLoading(true);
+      try {
+        const res = await fetch(
+          `${BACKEND_URL}/jobs?limit=200&region=${regionParam}&application_status=${statusParam}`,
+        );
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data: Job[] = await res.json();
+        setJobs(data);
+      } catch (err) {
+        console.error("failed to load jobs", err);
+      } finally {
+        setJobsLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleStatusChange = useCallback(
+    (jobId: number, newStatus: ApplicationStatus | null) => {
+      const matchesFilter =
+        statusFilter === "all" ||
+        statusFilter === "starred" ||
+        (statusFilter === "active" && newStatus === null) ||
+        statusFilter === newStatus;
+
+      setJobs((prev) =>
+        matchesFilter
+          ? prev.map((j) =>
+              j.id === jobId
+                ? {
+                    ...j,
+                    application_status: newStatus,
+                    status_updated_at: newStatus ? new Date().toISOString() : null,
+                  }
+                : j,
+            )
+          : prev.filter((j) => j.id !== jobId),
+      );
+      loadCounts(region);
+    },
+    [loadCounts, region, statusFilter],
+  );
+
+  const handleStarChange = useCallback(
+    (jobId: number, isStarred: boolean) => {
+      setJobs((prev) =>
+        statusFilter === "starred" && !isStarred
+          ? prev.filter((j) => j.id !== jobId)
+          : prev.map((j) => (j.id === jobId ? { ...j, is_starred: isStarred } : j)),
+      );
+      loadCounts(region);
+    },
+    [loadCounts, region, statusFilter],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -71,8 +175,59 @@ export default function JobsPage() {
   }, []);
 
   useEffect(() => {
-    loadJobs(region);
-  }, [loadJobs, region]);
+    loadJobs(region, statusFilter);
+  }, [loadJobs, region, statusFilter]);
+
+  useEffect(() => {
+    loadCounts(region);
+  }, [loadCounts, region]);
+
+  useEffect(() => {
+    enrichRequestedRef.current = new Set();
+  }, [region, statusFilter]);
+
+  useEffect(() => {
+    if (jobs.length === 0) return;
+    const targets = jobs
+      .filter(
+        (j) =>
+          j.founders.length === 0 &&
+          j.contact_emails.length === 0 &&
+          !enrichRequestedRef.current.has(j.id),
+      )
+      .slice(0, 20)
+      .map((j) => j.id);
+    if (targets.length === 0) return;
+    targets.forEach((id) => enrichRequestedRef.current.add(id));
+
+    let cancelled = false;
+    fetch(`${BACKEND_URL}/jobs/enrich-batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_ids: targets, force: false }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Record<string, { founders: Job["founders"]; contact_emails: string[] }> | null) => {
+        if (cancelled || !data) return;
+        setJobs((prev) =>
+          prev.map((j) => {
+            const enriched = data[String(j.id)];
+            return enriched
+              ? {
+                  ...j,
+                  founders: enriched.founders,
+                  contact_emails: enriched.contact_emails,
+                }
+              : j;
+          }),
+        );
+      })
+      .catch((err) => console.error("batch enrich failed", err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobs]);
 
   const lastScrapedLabel = useMemo(() => {
     if (jobs.length === 0) return null;
@@ -97,7 +252,8 @@ export default function JobsPage() {
       setScrapeMsg(
         `Scraped ${data.companies_visited} ${regionLabel} companies — ${data.jobs_inserted} new, ${data.jobs_updated} updated (total ${data.total_jobs_in_db}).`,
       );
-      await loadJobs(region);
+      await loadJobs(region, statusFilter);
+      loadCounts(region);
     } catch (err) {
       console.error("scrape failed", err);
       setScrapeError(err instanceof Error ? err.message : "scrape failed");
@@ -188,6 +344,34 @@ export default function JobsPage() {
         before pasting into your email or LinkedIn.
       </p>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {STATUS_FILTERS.map((f) => {
+          const active = statusFilter === f.value;
+          const count = counts?.[f.value];
+          return (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setStatusFilter(f.value)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                active
+                  ? "border-zinc-900 bg-zinc-900 text-white"
+                  : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-500"
+              }`}
+            >
+              {f.label}
+              {count !== undefined && (
+                <span
+                  className={`ml-1.5 ${active ? "text-zinc-300" : "text-zinc-400"}`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {jobsLoading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Loading jobs…
@@ -202,7 +386,12 @@ export default function JobsPage() {
       ) : (
         <ul className="flex flex-col gap-3">
           {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <JobCard
+              key={job.id}
+              job={job}
+              onStatusChange={handleStatusChange}
+              onStarChange={handleStarChange}
+            />
           ))}
         </ul>
       )}
@@ -249,11 +438,70 @@ function gmailComposeUrl(
   return `https://mail.google.com/mail/?${params.toString()}`;
 }
 
-function JobCard({ job: initialJob }: { job: Job }) {
+function JobCard({
+  job: initialJob,
+  onStatusChange,
+  onStarChange,
+}: {
+  job: Job;
+  onStatusChange: (jobId: number, newStatus: ApplicationStatus | null) => void;
+  onStarChange: (jobId: number, isStarred: boolean) => void;
+}) {
   const [job, setJob] = useState(initialJob);
   const [draft, setDraft] = useState<DraftState>({ status: "idle" });
   const [copied, setCopied] = useState<"subject" | "body" | "message" | null>(null);
   const [enriching, setEnriching] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updatingStar, setUpdatingStar] = useState(false);
+  const [showDescription, setShowDescription] = useState(false);
+
+  const toggleStar = async () => {
+    const next = !job.is_starred;
+    setUpdatingStar(true);
+    setJob({ ...job, is_starred: next });
+    try {
+      const res = await fetch(`${BACKEND_URL}/jobs/${job.id}/star`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_starred: next }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      onStarChange(job.id, next);
+    } catch (err) {
+      console.error("star toggle failed", err);
+      setJob({ ...job, is_starred: !next });
+    } finally {
+      setUpdatingStar(false);
+    }
+  };
+
+  const setStatus = async (newStatus: ApplicationStatus | null) => {
+    setUpdatingStatus(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/jobs/${job.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data: {
+        application_status: ApplicationStatus | null;
+        status_updated_at: string | null;
+      } = await res.json();
+      setJob({
+        ...job,
+        application_status: data.application_status,
+        status_updated_at: data.status_updated_at,
+      });
+      onStatusChange(job.id, data.application_status);
+    } catch (err) {
+      console.error("status update failed", err);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const meta = statusMeta(job.application_status);
 
   const enrich = async () => {
     setEnriching(true);
@@ -276,10 +524,21 @@ function JobCard({ job: initialJob }: { job: Job }) {
     }
   };
 
-  const generate = async (kind: DraftKind) => {
+  const generate = async (kind: DraftKind, options: { force?: boolean } = {}) => {
     setDraft({ status: "loading", kind });
     setCopied(null);
     try {
+      if (!options.force && job.draft_kinds.includes(kind)) {
+        const cached = await fetch(
+          `${BACKEND_URL}/jobs/${job.id}/draft?kind=${kind}`,
+        );
+        if (cached.ok) {
+          const data = (await cached.json()) as EmailDraft | LinkedInDraft;
+          setDraft({ status: "ready", kind, draft: data });
+          return;
+        }
+      }
+
       const res = await fetch(
         `${BACKEND_URL}/jobs/${job.id}/draft?kind=${kind}`,
         { method: "POST" },
@@ -290,6 +549,9 @@ function JobCard({ job: initialJob }: { job: Job }) {
       }
       const data = (await res.json()) as EmailDraft | LinkedInDraft;
       setDraft({ status: "ready", kind, draft: data });
+      if (!job.draft_kinds.includes(kind)) {
+        setJob({ ...job, draft_kinds: [...job.draft_kinds, kind] });
+      }
     } catch (err) {
       setDraft({
         status: "error",
@@ -327,6 +589,15 @@ function JobCard({ job: initialJob }: { job: Job }) {
       <div className="flex items-start gap-4">
         <div className="flex flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleStar}
+              disabled={updatingStar}
+              title={job.is_starred ? "Unstar" : "Star this job"}
+              className="rounded-full p-1 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <StarIcon filled={job.is_starred} className="h-4 w-4" />
+            </button>
             <a
               href={job.source_url}
               target="_blank"
@@ -419,40 +690,96 @@ function JobCard({ job: initialJob }: { job: Job }) {
               {job.contact_emails.join(", ")}
             </p>
           )}
+
+          {job.description && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowDescription((v) => !v)}
+                className="text-xs text-zinc-600 underline hover:text-zinc-900"
+              >
+                {showDescription ? "Hide description" : "Show description"}
+              </button>
+              {showDescription && (
+                <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-800">
+                    {job.description}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col items-end gap-2">
           <span className="text-xs text-zinc-400">
             {timeAgo(job.scraped_at)}
           </span>
+          {meta && (
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${meta.color}`}
+            >
+              {meta.label}
+            </span>
+          )}
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => generate("email")}
               disabled={draft.status === "loading"}
-              title="Draft & open in Gmail"
-              className="rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                job.draft_kinds.includes("email")
+                  ? "Open saved Gmail draft"
+                  : "Draft & open in Gmail"
+              }
+              className="relative rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {draft.status === "loading" && draft.kind === "email" ? (
                 <span className="block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
               ) : (
                 <GmailIcon className="h-5 w-5" />
               )}
+              {job.draft_kinds.includes("email") && (
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
+              )}
             </button>
             <button
               type="button"
               onClick={() => generate("linkedin")}
               disabled={draft.status === "loading"}
-              title="Draft & open LinkedIn"
-              className="rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                job.draft_kinds.includes("linkedin")
+                  ? "Open saved LinkedIn draft"
+                  : "Draft & open LinkedIn"
+              }
+              className="relative rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {draft.status === "loading" && draft.kind === "linkedin" ? (
                 <span className="block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
               ) : (
                 <LinkedInIcon className="h-5 w-5" />
               )}
+              {job.draft_kinds.includes("linkedin") && (
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
+              )}
             </button>
           </div>
+          <select
+            value={job.application_status ?? ""}
+            onChange={(e) =>
+              setStatus(e.target.value === "" ? null : (e.target.value as ApplicationStatus))
+            }
+            disabled={updatingStatus}
+            className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Mark application status"
+          >
+            <option value="">Mark status…</option>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -530,8 +857,15 @@ function JobCard({ job: initialJob }: { job: Job }) {
             </a>
             <button
               type="button"
-              onClick={() => setDraft({ status: "idle" })}
+              onClick={() => generate("email", { force: true })}
               className="ml-auto text-xs text-zinc-500 underline hover:text-zinc-800"
+            >
+              Regenerate
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft({ status: "idle" })}
+              className="text-xs text-zinc-500 underline hover:text-zinc-800"
             >
               Clear
             </button>
@@ -604,8 +938,15 @@ function JobCard({ job: initialJob }: { job: Job }) {
             </p>
             <button
               type="button"
-              onClick={() => setDraft({ status: "idle" })}
+              onClick={() => generate("linkedin", { force: true })}
               className="ml-auto text-xs text-zinc-500 underline hover:text-zinc-800"
+            >
+              Regenerate
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft({ status: "idle" })}
+              className="text-xs text-zinc-500 underline hover:text-zinc-800"
             >
               Clear
             </button>
