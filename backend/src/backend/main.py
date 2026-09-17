@@ -1,12 +1,16 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+
+logging.basicConfig(level=logging.INFO)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import get_settings
 from backend.db import init_db
 from backend.routers import jobs, preferences, resumes
+from backend.visitor import router as sessions_router
 
 settings = get_settings()
 
@@ -18,6 +22,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def prevent_private_response_caching(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/sessions", "/resumes", "/preferences", "/jobs")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 _cors_origins = list({
     settings.frontend_url,
@@ -36,6 +48,7 @@ app.add_middleware(
 )
 
 app.include_router(resumes.router)
+app.include_router(sessions_router)
 app.include_router(preferences.router)
 app.include_router(jobs.router)
 

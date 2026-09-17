@@ -35,20 +35,23 @@ Hard rules:
 
 Return ONLY a JSON object: {"subject": "...", "body": "..."}."""
 
-_LINKEDIN_SYSTEM = """You write a short, friendly LinkedIn connection-request message for a candidate reaching out about a specific role.
+_LINKEDIN_SYSTEM = """You write a compelling LinkedIn message for a candidate reaching out about a specific role at a startup.
 
-Output a single JSON object with exactly one key, "message", whose value is the message text. The message MUST be a complete, natural-language note of 100-280 characters.
+Output a single JSON object with exactly one key, "message", whose value is the message text. The message should be 600-900 characters.
 
-Hard rules for the message:
-- 2-3 sentences. Direct, friendly, no fluff.
-- Open with "Hi [first name]," if a founder/recruiter name is provided in the context, otherwise "Hi {{Company}} team,".
-- Reference the company and the specific role naturally.
-- Mention ONE concrete relevant skill or experience drawn from the resume.
-- End with a soft ask to connect or chat.
-- Do NOT invent details. Do NOT use emoji or markdown. Do NOT include "Subject:", labels, or any prefix outside the message itself.
+Structure (flow naturally, do NOT use headers or bullet points):
+1. Open with "Hi [first name]," if a founder/recruiter name is provided, otherwise "Hi {{Company}} team,".
+2. Reference the company and the specific role. Say something specific about WHY this company excites you — use the company one-liner, industry, or job description to show genuine interest.
+3. Highlight the candidate's relevant experience. Specifically mention their work at Accenture supporting Goldman Sachs production systems — debugging distributed workflow failures, resolving 100+ tickets/month, mentoring junior engineers, and driving fixes end-to-end. Frame this as production-grade engineering experience.
+4. Explain why you'd be a good fit for THIS specific role — draw concrete connections between the job description and the candidate's skills/experience.
+5. Share motivation: after working in large MNCs, the candidate is looking for exposure in a startup environment — they want growth, a fast-paced environment, and the chance to make a direct impact.
+6. Close with personal values: honesty, hard work, and a genuine eagerness to learn and contribute. End with a soft ask to connect or chat.
+7. Sign off with the candidate's first name.
 
-Example output (verbatim format):
-{"message": "Hi Alex, I came across Acme's Backend Engineer role and your work on the platform team. My recent work building Python/FastAPI services on AWS feels like a strong fit. Would love to connect."}
+Hard rules:
+- Do NOT invent skills, employers, or accomplishments. Use only what's in the resume.
+- Do NOT use emoji, markdown, or bullet points. Write it as a natural flowing message.
+- Do NOT use generic filler. Every sentence should be specific to either the candidate or the company.
 
 Return ONLY the JSON object — no prose, no markdown fences."""
 
@@ -252,7 +255,8 @@ def draft_email(job: Job, resume: Resume) -> EmailDraft:
 def _linkedin_template(job: Job, resume: Resume) -> str:
     parsed = resume.parsed or {}
     contact = parsed.get("contact") or {}
-    skills = [s for s in (parsed.get("skills") or []) if isinstance(s, str)][:3]
+    skills = [s for s in (parsed.get("skills") or []) if isinstance(s, str)][:5]
+    experience = parsed.get("experience") or []
 
     founder_first = None
     if job.founders:
@@ -266,19 +270,39 @@ def _linkedin_template(job: Job, resume: Resume) -> str:
     greeting = f"Hi {founder_first}," if founder_first else f"Hi {job.company_name} team,"
     skill_blob = ", ".join(skills) if skills else "the relevant tech stack"
     name = (contact.get("name") or "").strip()
-    sign = f"\n\n— {name.split()[0]}" if name else ""
+    first_name = name.split()[0] if name else "Aagam"
+    one_liner = (job.company_one_liner or "").strip().rstrip(".")
 
-    msg = (
-        f"{greeting} I came across {job.company_name}'s {job.title} role and "
-        f"my background in {skill_blob} feels like a strong fit. "
-        f"Would love to connect.{sign}"
+    exp_line = ""
+    for e in experience[:2]:
+        if isinstance(e, dict) and e.get("title") and e.get("company"):
+            exp_line = f"In my current role as {e['title']} at {e['company']}, I've been working on debugging and resolving issues in distributed production systems, handling 100+ tickets monthly, and mentoring junior engineers. "
+            break
+
+    company_line = (
+        f"I came across {job.company_name}'s {job.title} role and I'm genuinely excited about it"
+        + (f" — {one_liner} is exactly the kind of problem I want to work on. " if one_liner else ". ")
     )
-    if len(msg) > 280:
-        msg = msg[:277].rstrip() + "..."
-    return msg
+
+    fit_line = f"My background in {skill_blob} aligns well with what you're building, and I'd love the chance to contribute. "
+
+    motivation = (
+        "After working in large MNCs, I'm looking for startup exposure where I can grow fast, "
+        "make a direct impact, and be part of a team that moves quickly. "
+    )
+
+    closing = (
+        "I bring honesty, hard work, and a genuine eagerness to learn. "
+        f"Would love to connect and chat about how I could add value.\n\n— {first_name}"
+    )
+
+    return f"{greeting} {company_line}{exp_line}{fit_line}{motivation}{closing}"
 
 
 def draft_linkedin(job: Job, resume: Resume) -> str:
+    import logging
+    _log = logging.getLogger(__name__)
+
     founders_line = ""
     if job.founders:
         names = [f.get("name") for f in job.founders if isinstance(f, dict) and f.get("name")]
@@ -287,16 +311,19 @@ def draft_linkedin(job: Job, resume: Resume) -> str:
 
     user = (
         f"{_resume_context(resume)}\n\n--- TARGET JOB ---\n{_job_context(job)}{founders_line}\n\n"
-        "Write the LinkedIn connection message."
+        "Write the LinkedIn message."
     )
     try:
-        data = _call_llm(_LINKEDIN_SYSTEM, user, max_tokens=500)
+        data = _call_llm(_LINKEDIN_SYSTEM, user, max_tokens=1200)
         msg = data.get("message") if isinstance(data, dict) else None
         if isinstance(msg, str):
             msg = msg.strip()
-            if 40 <= len(msg) <= 320:
+            if len(msg) >= 100:
                 return msg
-    except OutreachError:
-        pass
+            _log.warning("linkedin LLM message too short (%d chars), using template", len(msg))
+        else:
+            _log.warning("linkedin LLM returned no 'message' key: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+    except OutreachError as e:
+        _log.warning("linkedin LLM call failed: %s — using template fallback", e)
 
     return _linkedin_template(job, resume)

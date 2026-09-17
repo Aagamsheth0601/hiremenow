@@ -13,6 +13,7 @@ from backend.services.resume_parser import (
     ResumeParseError,
     suggest_target_roles,
 )
+from backend.visitor import get_visitor_hash
 
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
@@ -49,8 +50,10 @@ def _seniority_from_years(years: float | None) -> str | None:
     return "staff+"
 
 
-def _prefill_from_resume(session: Session) -> PreferencesPayload:
-    resume = session.exec(select(Resume).order_by(Resume.uploaded_at.desc())).first()
+def _prefill_from_resume(session: Session, owner_hash: str) -> PreferencesPayload:
+    resume = session.exec(
+        select(Resume).where(Resume.owner_hash == owner_hash).order_by(Resume.uploaded_at.desc())
+    ).first()
     if resume is None or not resume.parsed:
         return PreferencesPayload()
 
@@ -100,28 +103,31 @@ def _to_response(prefs: JobPreferences | None, fallback: PreferencesPayload) -> 
 
 
 @router.get("")
-def get_preferences(session: Session = Depends(get_session)) -> PreferencesResponse:
-    prefs = session.exec(select(JobPreferences)).first()
+def get_preferences(
+    session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)
+) -> PreferencesResponse:
+    prefs = session.exec(select(JobPreferences).where(JobPreferences.owner_hash == owner_hash)).first()
     if prefs is not None:
         return _to_response(prefs, PreferencesPayload())
-    return _to_response(None, _prefill_from_resume(session))
+    return _to_response(None, _prefill_from_resume(session, owner_hash))
 
 
 @router.put("")
 def upsert_preferences(
     payload: PreferencesPayload,
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> PreferencesResponse:
-    has_resume = session.exec(select(Resume.id)).first() is not None
+    has_resume = session.exec(select(Resume.id).where(Resume.owner_hash == owner_hash)).first() is not None
     if not has_resume:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Upload a resume before saving preferences.",
         )
 
-    prefs = session.exec(select(JobPreferences)).first()
+    prefs = session.exec(select(JobPreferences).where(JobPreferences.owner_hash == owner_hash)).first()
     if prefs is None:
-        prefs = JobPreferences()
+        prefs = JobPreferences(owner_hash=owner_hash)
 
     prefs.target_roles = payload.target_roles
     prefs.seniority = payload.seniority
@@ -139,8 +145,12 @@ def upsert_preferences(
 
 
 @router.post("/suggest-roles")
-def suggest_roles(session: Session = Depends(get_session)) -> dict[str, list[str]]:
-    resume = session.exec(select(Resume).order_by(Resume.uploaded_at.desc())).first()
+def suggest_roles(
+    session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)
+) -> dict[str, list[str]]:
+    resume = session.exec(
+        select(Resume).where(Resume.owner_hash == owner_hash).order_by(Resume.uploaded_at.desc())
+    ).first()
     if resume is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

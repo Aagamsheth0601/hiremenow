@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
+  apiFetch,
   BACKEND_URL,
   type ApplicationStatus,
   type EmailDraft,
@@ -87,12 +88,14 @@ export default function JobsPage() {
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [region, setRegion] = useState<"india" | "us">("india");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [page, setPage] = useState(0);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
   const enrichRequestedRef = useRef<Set<number>>(new Set());
 
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${BACKEND_URL}/jobs/status-counts?region=${regionParam}`,
       );
       if (!res.ok) return;
@@ -106,7 +109,7 @@ export default function JobsPage() {
     async (regionParam: "india" | "us", statusParam: StatusFilter) => {
       setJobsLoading(true);
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `${BACKEND_URL}/jobs?limit=200&region=${regionParam}&application_status=${statusParam}`,
         );
         if (!res.ok) throw new Error(`status ${res.status}`);
@@ -161,7 +164,7 @@ export default function JobsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${BACKEND_URL}/preferences`)
+    apiFetch(`${BACKEND_URL}/preferences`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled) setPrefs(data);
@@ -175,6 +178,7 @@ export default function JobsPage() {
   }, []);
 
   useEffect(() => {
+    setPage(0);
     loadJobs(region, statusFilter);
   }, [loadJobs, region, statusFilter]);
 
@@ -201,7 +205,7 @@ export default function JobsPage() {
     targets.forEach((id) => enrichRequestedRef.current.add(id));
 
     let cancelled = false;
-    fetch(`${BACKEND_URL}/jobs/enrich-batch`, {
+    apiFetch(`${BACKEND_URL}/jobs/enrich-batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_ids: targets, force: false }),
@@ -229,6 +233,19 @@ export default function JobsPage() {
     };
   }, [jobs]);
 
+  const JOBS_PER_PAGE = 30;
+
+  const sortedJobs = useMemo(() => {
+    return [...jobs].sort((a, b) => {
+      const sa = a.match_score ?? 0;
+      const sb = b.match_score ?? 0;
+      return sortDir === "desc" ? sb - sa : sa - sb;
+    });
+  }, [jobs, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedJobs.length / JOBS_PER_PAGE));
+  const pagedJobs = sortedJobs.slice(page * JOBS_PER_PAGE, (page + 1) * JOBS_PER_PAGE);
+
   const lastScrapedLabel = useMemo(() => {
     if (jobs.length === 0) return null;
     const newest = jobs.reduce((acc, j) =>
@@ -242,7 +259,7 @@ export default function JobsPage() {
     setScrapeMsg(null);
     setScrapeError(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${BACKEND_URL}/jobs/scrape?company_limit=25&job_limit_per_company=5&region=${region}`,
         { method: "POST" },
       );
@@ -303,7 +320,7 @@ export default function JobsPage() {
                   }`}
             </p>
             <p className="text-xs text-zinc-500">
-              Sorted by match score (out of 10) — overlap of job title and
+              Sorted by match score (out of 10, {sortDir === "desc" ? "highest first" : "lowest first"}) — overlap of job title and
               description with your resume skills and saved target roles.
             </p>
           </div>
@@ -370,13 +387,23 @@ export default function JobsPage() {
             </button>
           );
         })}
+
+        <span className="mx-1 h-4 w-px bg-zinc-300" />
+
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}
+          className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700 transition hover:border-zinc-500"
+        >
+          Score {sortDir === "desc" ? "↓" : "↑"}
+        </button>
       </div>
 
       {jobsLoading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Loading jobs…
         </div>
-      ) : jobs.length === 0 ? (
+      ) : pagedJobs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center">
           <p className="text-sm font-medium text-zinc-700">No jobs yet.</p>
           <p className="mt-2 text-xs text-zinc-500">
@@ -384,16 +411,42 @@ export default function JobsPage() {
           </p>
         </div>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {jobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              onStatusChange={handleStatusChange}
-              onStarChange={handleStarChange}
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="flex flex-col gap-3">
+            {pagedJobs.map((job) => (
+              <JobCard
+                key={job.id}
+                job={job}
+                onStatusChange={handleStatusChange}
+                onStarChange={handleStarChange}
+              />
+            ))}
+          </ul>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-zinc-600">
+                Page {page + 1} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -450,6 +503,7 @@ function JobCard({
   const [job, setJob] = useState(initialJob);
   const [draft, setDraft] = useState<DraftState>({ status: "idle" });
   const [copied, setCopied] = useState<"subject" | "body" | "message" | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [enriching, setEnriching] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingStar, setUpdatingStar] = useState(false);
@@ -460,7 +514,7 @@ function JobCard({
     setUpdatingStar(true);
     setJob({ ...job, is_starred: next });
     try {
-      const res = await fetch(`${BACKEND_URL}/jobs/${job.id}/star`, {
+      const res = await apiFetch(`${BACKEND_URL}/jobs/${job.id}/star`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_starred: next }),
@@ -478,7 +532,7 @@ function JobCard({
   const setStatus = async (newStatus: ApplicationStatus | null) => {
     setUpdatingStatus(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/jobs/${job.id}/status`, {
+      const res = await apiFetch(`${BACKEND_URL}/jobs/${job.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
@@ -506,7 +560,7 @@ function JobCard({
   const enrich = async () => {
     setEnriching(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/jobs/${job.id}/enrich`, {
+      const res = await apiFetch(`${BACKEND_URL}/jobs/${job.id}/enrich`, {
         method: "POST",
       });
       if (!res.ok) return;
@@ -529,7 +583,7 @@ function JobCard({
     setCopied(null);
     try {
       if (!options.force && job.draft_kinds.includes(kind)) {
-        const cached = await fetch(
+        const cached = await apiFetch(
           `${BACKEND_URL}/jobs/${job.id}/draft?kind=${kind}`,
         );
         if (cached.ok) {
@@ -539,7 +593,7 @@ function JobCard({
         }
       }
 
-      const res = await fetch(
+      const res = await apiFetch(
         `${BACKEND_URL}/jobs/${job.id}/draft?kind=${kind}`,
         { method: "POST" },
       );
@@ -583,6 +637,25 @@ function JobCard({
       "noopener,noreferrer",
     );
   };
+
+  const downloadResume = async () => {
+    setDownloadError(null);
+    try {
+      const response = await apiFetch(`${BACKEND_URL}/resumes/latest/pdf`);
+      if (!response.ok) throw new Error("Could not download your resume.");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "resume.pdf";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Download failed.");
+    }
+  };
+
+  const emailDraft = draft.status === "ready" && draft.draft.kind === "email" ? draft.draft : null;
+  const linkedInDraft = draft.status === "ready" && draft.draft.kind === "linkedin" ? draft.draft : null;
 
   return (
     <li className="group rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
@@ -652,6 +725,29 @@ function JobCard({
             </div>
           )}
 
+          {job.match_details && (
+            <details className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm">
+              <summary className="cursor-pointer font-medium text-emerald-950">
+                Why this match
+                {job.match_details.matched_skills.length > 0 && (
+                  <span className="ml-2 font-normal text-emerald-800">
+                    {job.match_details.matched_skills.slice(0, 3).join(" · ")}
+                  </span>
+                )}
+              </summary>
+              <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-700">
+                {job.match_details.matched_target_roles.length > 0 && (
+                  <p>Role match: {job.match_details.matched_target_roles.join(", ")}</p>
+                )}
+                <p>Skills in both your resume and this job post: {job.match_details.matched_skills.join(", ") || "none identified"}.</p>
+                {job.match_details.missing_skills.length > 0 && (
+                  <p>Job post also mentions: {job.match_details.missing_skills.join(", ")}. Check whether these appear elsewhere in your resume.</p>
+                )}
+                <p className="text-slate-500">This score uses extracted text and is a guide, not an employer assessment.</p>
+              </div>
+            </details>
+          )}
+
           {job.founders.length > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -713,7 +809,7 @@ function JobCard({
 
         <div className="flex flex-col items-end gap-2">
           <span className="text-xs text-zinc-400">
-            {timeAgo(job.scraped_at)}
+            Job posted {timeAgo(job.scraped_at)}
           </span>
           {meta && (
             <span
@@ -789,15 +885,15 @@ function JobCard({
         </p>
       )}
 
-      {draft.status === "ready" && draft.draft.kind === "email" && (
+      {emailDraft && (
         <div className="mt-4 flex flex-col gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
               Recipients
             </span>
-            {draft.draft.recipients.length > 0 ? (
+            {emailDraft.recipients.length > 0 ? (
               <p className="text-sm text-zinc-900">
-                {draft.draft.recipients.join(", ")}
+                {emailDraft.recipients.join(", ")}
               </p>
             ) : (
               <p className="text-sm text-amber-700">
@@ -813,13 +909,13 @@ function JobCard({
               </span>
               <button
                 type="button"
-                onClick={() => copy(draft.draft.subject, "subject")}
+                onClick={() => copy(emailDraft.subject, "subject")}
                 className="text-xs text-zinc-600 underline hover:text-zinc-900"
               >
                 {copied === "subject" ? "Copied" : "Copy"}
               </button>
             </div>
-            <p className="text-sm text-zinc-900">{draft.draft.subject}</p>
+            <p className="text-sm text-zinc-900">{emailDraft.subject}</p>
           </div>
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
@@ -828,14 +924,14 @@ function JobCard({
               </span>
               <button
                 type="button"
-                onClick={() => copy(draft.draft.body, "body")}
+                onClick={() => copy(emailDraft.body, "body")}
                 className="text-xs text-zinc-600 underline hover:text-zinc-900"
               >
                 {copied === "body" ? "Copied" : "Copy"}
               </button>
             </div>
             <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-800">
-              {draft.draft.body}
+              {emailDraft.body}
             </pre>
           </div>
           <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-3">
@@ -847,14 +943,13 @@ function JobCard({
               <GmailIcon className="h-4 w-4" />
               Open in Gmail
             </button>
-            <a
-              href={`${BACKEND_URL}/resumes/latest/pdf`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={downloadResume}
               className="text-xs text-zinc-700 underline hover:text-zinc-900"
             >
               Download resume
-            </a>
+            </button>
             <button
               type="button"
               onClick={() => generate("email", { force: true })}
@@ -873,34 +968,35 @@ function JobCard({
           <p className="text-xs text-zinc-500">
             Gmail doesn't support attachments via URL — attach the resume manually after the compose window opens.
           </p>
+          {downloadError && <p role="alert" className="text-xs text-red-700">{downloadError}</p>}
         </div>
       )}
 
-      {draft.status === "ready" && draft.draft.kind === "linkedin" && (
+      {linkedInDraft && (
         <div className="mt-4 flex flex-col gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                LinkedIn message ({draft.draft.message.length} chars)
+                LinkedIn message ({linkedInDraft.message.length} chars)
               </span>
               <button
                 type="button"
-                onClick={() => copy(draft.draft.message, "message")}
+                onClick={() => copy(linkedInDraft.message, "message")}
                 className="text-xs text-zinc-600 underline hover:text-zinc-900"
               >
                 {copied === "message" ? "Copied" : "Copy"}
               </button>
             </div>
-            <p className="text-sm text-zinc-800">{draft.draft.message}</p>
+            <p className="text-sm text-zinc-800">{linkedInDraft.message}</p>
           </div>
 
           <div className="flex flex-col gap-2 border-t border-zinc-200 pt-3">
             <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
               Founder profiles
             </span>
-            {draft.draft.founders.length > 0 ? (
+            {linkedInDraft.founders.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {draft.draft.founders.map((f) => (
+                {linkedInDraft.founders.map((f) => (
                   <a
                     key={f.linkedin_url}
                     href={f.linkedin_url}

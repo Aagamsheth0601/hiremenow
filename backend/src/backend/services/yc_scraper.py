@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from sqlmodel import Session, select
 
 from backend.models import Job
+from backend.services.matcher import MatchProfile, score_job, passes_threshold
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +43,55 @@ class ScrapeStats:
     jobs_seen: int = 0
     jobs_inserted: int = 0
     jobs_updated: int = 0
+    jobs_skipped: int = 0
     errors: int = 0
+
+
+def _algolia_query(
+    client: httpx.Client,
+    *,
+    query: str,
+    hits_per_page: int,
+    facet_filters: list[Any],
+) -> list[dict[str, Any]]:
+    url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
+    headers = {
+        "X-Algolia-API-Key": ALGOLIA_SEARCH_KEY,
+        "X-Algolia-Application-Id": ALGOLIA_APP_ID,
+        "Content-Type": "application/json",
+    }
+    body = {
+        "query": query,
+        "hitsPerPage": hits_per_page,
+        "page": 0,
+        "facetFilters": facet_filters,
+    }
+    r = client.post(url, headers=headers, json=body, timeout=15.0)
+    r.raise_for_status()
+    return r.json().get("hits", [])
+
+
+def _build_facet_filters(region: str | None) -> tuple[list[Any], str | None]:
+    facet_filters: list[Any] = ["isHiring:true"]
+    region_term: str | None = None
+    if region:
+        region_term = REGION_FILTERS.get(region.lower())
+        if region_term:
+            facet_filters.append(f"regions:{region_term}")
+    return facet_filters, region_term
+
+
+def _filter_by_region(hits: list[dict[str, Any]], region_term: str | None) -> list[dict[str, Any]]:
+    if not region_term:
+        return hits
+    needle = region_term.lower()
+    country_short = "united states" if needle.startswith("united states") else needle
+    filtered = [
+        h for h in hits
+        if country_short in (h.get("all_locations") or "").lower()
+        or country_short in " ".join(h.get("regions") or []).lower()
+    ]
+    return filtered or hits
 
 
 def _algolia_search_hiring(
@@ -51,41 +100,48 @@ def _algolia_search_hiring(
     hits_per_page: int,
     region: str | None = None,
 ) -> list[dict[str, Any]]:
-    url = f"https://{ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/{ALGOLIA_INDEX}/query"
-    headers = {
-        "X-Algolia-API-Key": ALGOLIA_SEARCH_KEY,
-        "X-Algolia-Application-Id": ALGOLIA_APP_ID,
-        "Content-Type": "application/json",
-    }
-    facet_filters: list[Any] = ["isHiring:true"]
+    facet_filters, region_term = _build_facet_filters(region)
     fetch_count = hits_per_page
-    region_term: str | None = None
-    if region:
-        region_term = REGION_FILTERS.get(region.lower())
-        if region_term:
-            facet_filters.append(f"regions:{region_term}")
-            fetch_count = max(hits_per_page * 3, hits_per_page)
-
-    body = {
-        "query": "",
-        "hitsPerPage": fetch_count,
-        "page": 0,
-        "facetFilters": facet_filters,
-    }
-    r = client.post(url, headers=headers, json=body, timeout=15.0)
-    r.raise_for_status()
-    hits = r.json().get("hits", [])
-
     if region_term:
-        needle = region_term.lower()
-        country_short = "united states" if needle.startswith("united states") else needle
-        filtered = [
-            h for h in hits
-            if country_short in (h.get("all_locations") or "").lower()
-            or country_short in " ".join(h.get("regions") or []).lower()
-        ]
-        hits = filtered or hits
+        fetch_count = max(hits_per_page * 3, hits_per_page)
+
+    hits = _algolia_query(
+        client, query="", hits_per_page=fetch_count, facet_filters=facet_filters,
+    )
+    hits = _filter_by_region(hits, region_term)
     return hits[:hits_per_page]
+
+
+def _algolia_search_multi(
+    client: httpx.Client,
+    *,
+    search_terms: list[str],
+    hits_per_query: int = 15,
+    region: str | None = None,
+) -> list[dict[str, Any]]:
+    facet_filters: list[Any] = ["isHiring:true"]
+
+    seen_slugs: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    for term in search_terms:
+        log.info("algolia targeted query: %r", term)
+        try:
+            hits = _algolia_query(
+                client, query=term, hits_per_page=hits_per_query, facet_filters=facet_filters,
+            )
+        except httpx.HTTPError as e:
+            log.warning("algolia query failed for %r: %s", term, e)
+            continue
+        for h in hits:
+            slug = h.get("slug")
+            if slug and slug not in seen_slugs:
+                seen_slugs.add(slug)
+                results.append(h)
+        time.sleep(REQUEST_DELAY_SECONDS)
+
+    log.info("targeted search: %d terms -> %d unique companies", len(search_terms), len(results))
+    return results
 
 
 def _fetch(client: httpx.Client, url: str) -> str | None:
@@ -366,6 +422,8 @@ def scrape_yc_jobs(
     company_limit: int = 10,
     job_limit_per_company: int = 10,
     region: str | None = None,
+    search_terms: list[str] | None = None,
+    match_profile: MatchProfile | None = None,
 ) -> ScrapeStats:
     stats = ScrapeStats()
     headers = {
@@ -381,9 +439,22 @@ def scrape_yc_jobs(
         http2=False,
     ) as client:
         try:
-            companies = _algolia_search_hiring(
-                client, hits_per_page=company_limit, region=region
-            )
+            if search_terms:
+                hits_per_query = max(10, min(25, company_limit // len(search_terms) + 5))
+                companies = _algolia_search_multi(
+                    client,
+                    search_terms=search_terms,
+                    hits_per_query=hits_per_query,
+                    region=region,
+                )[:company_limit]
+                log.info(
+                    "targeted scrape: %d terms -> %d unique companies",
+                    len(search_terms), len(companies),
+                )
+            else:
+                companies = _algolia_search_hiring(
+                    client, hits_per_page=company_limit, region=region
+                )
         except httpx.HTTPError as e:
             log.error("algolia search failed: %s", e)
             stats.errors += 1
@@ -419,6 +490,15 @@ def scrape_yc_jobs(
                     continue
                 try:
                     parsed = _parse_job_page(job_html)
+                    if match_profile:
+                        temp = Job(
+                            title=parsed["title"] or "Untitled role",
+                            description=parsed["description"],
+                        )
+                        sc, bd = score_job(temp, match_profile)
+                        if not passes_threshold(sc, bd):
+                            stats.jobs_skipped += 1
+                            continue
                     _upsert_job(
                         session,
                         company=company,

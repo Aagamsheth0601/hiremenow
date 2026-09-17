@@ -13,6 +13,7 @@ class Resume(SQLModel, table=True):
     __tablename__ = "resumes"
 
     id: int | None = Field(default=None, primary_key=True)
+    owner_hash: str = Field(index=True)
     filename: str
     raw_text: str
     parsed: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

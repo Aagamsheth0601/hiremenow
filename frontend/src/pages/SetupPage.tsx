@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  apiFetch,
   BACKEND_URL,
   type Preferences,
   type UploadResponse,
@@ -56,7 +57,7 @@ export default function SetupPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${BACKEND_URL}/resumes`)
+    apiFetch(`${BACKEND_URL}/resumes`)
       .then((res) => {
         if (!res.ok) throw new Error(`Could not load resumes (${res.status})`);
         return res.json();
@@ -87,7 +88,7 @@ export default function SetupPage() {
     form.append("file", file);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/resumes`, {
+      const res = await apiFetch(`${BACKEND_URL}/resumes`, {
         method: "POST",
         body: form,
       });
@@ -383,7 +384,7 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
     setLoading(true);
     setError(null);
 
-    fetch(`${BACKEND_URL}/preferences`)
+    apiFetch(`${BACKEND_URL}/preferences`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`Load failed (${res.status})`);
         return (await res.json()) as Preferences;
@@ -421,7 +422,7 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
     setSuggesting(true);
     setSuggestError(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/preferences/suggest-roles`, {
+      const res = await apiFetch(`${BACKEND_URL}/preferences/suggest-roles`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -446,7 +447,7 @@ function PreferencesForm({ refreshKey }: { refreshKey: number }) {
     setError(null);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/preferences`, {
+      const res = await apiFetch(`${BACKEND_URL}/preferences`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

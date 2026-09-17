@@ -11,10 +11,11 @@ def _utcnow() -> datetime:
 class Draft(SQLModel, table=True):
     __tablename__ = "drafts"
     __table_args__ = (
-        UniqueConstraint("job_id", "kind", name="uq_drafts_job_kind"),
+        UniqueConstraint("owner_hash", "job_id", "kind", name="uq_drafts_owner_job_kind"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
+    owner_hash: str = Field(index=True)
     job_id: int = Field(foreign_key="jobs.id", index=True)
     kind: str = Field(index=True)
 

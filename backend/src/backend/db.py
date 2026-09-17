@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from backend.config import get_settings
@@ -16,10 +16,21 @@ engine = create_engine(
 )
 
 
+if _settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _secure_sqlite_deletes(dbapi_connection, _connection_record) -> None:
+        dbapi_connection.execute("PRAGMA secure_delete=ON")
+
+
 def _ensure_columns() -> None:
     if not _settings.database_url.startswith("sqlite"):
         return
     with engine.begin() as conn:
+        visitor_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(visitor_sessions)"))}
+        if visitor_cols and "last_seen_at" not in visitor_cols:
+            conn.execute(text("ALTER TABLE visitor_sessions ADD COLUMN last_seen_at TIMESTAMP"))
+            conn.execute(text("UPDATE visitor_sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL"))
+
         resume_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(resumes)"))}
         if "pdf_bytes" not in resume_cols:
             conn.execute(text("ALTER TABLE resumes ADD COLUMN pdf_bytes BLOB"))

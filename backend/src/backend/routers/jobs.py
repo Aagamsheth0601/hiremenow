@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, func, select
 
 from backend.db import get_session
-from backend.models import Draft, Job, JobPreferences, Resume
-from backend.services.matcher import build_profile, passes_threshold, score_job
+from backend.models import Draft, Job, JobPreferences, Resume, VisitorJobState
+from backend.services.matcher import build_profile, passes_threshold, score_job, search_terms_from_profile
 from backend.services.outreach import (
     OutreachError,
     draft_email,
@@ -20,10 +20,40 @@ from backend.services.yc_scraper import (
     enrich_jobs_batch,
     scrape_yc_jobs,
 )
+from backend.visitor import get_visitor_hash
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 APPLICATION_STATUSES = ("reached_out", "applied", "replied", "rejected")
+
+
+def _resume_for(session: Session, owner_hash: str) -> Resume | None:
+    return session.exec(
+        select(Resume).where(Resume.owner_hash == owner_hash).order_by(Resume.uploaded_at.desc())
+    ).first()
+
+
+def _prefs_for(session: Session, owner_hash: str) -> JobPreferences | None:
+    return session.exec(select(JobPreferences).where(JobPreferences.owner_hash == owner_hash)).first()
+
+
+def _states_for(session: Session, owner_hash: str, job_ids: list[int]) -> dict[int, VisitorJobState]:
+    if not job_ids:
+        return {}
+    rows = session.exec(
+        select(VisitorJobState).where(
+            VisitorJobState.owner_hash == owner_hash,
+            VisitorJobState.job_id.in_(job_ids),
+        )
+    ).all()
+    return {row.job_id: row for row in rows}
+
+
+def _state_for(session: Session, owner_hash: str, job_id: int) -> VisitorJobState:
+    state = session.exec(select(VisitorJobState).where(
+        VisitorJobState.owner_hash == owner_hash, VisitorJobState.job_id == job_id
+    )).first()
+    return state or VisitorJobState(owner_hash=owner_hash, job_id=job_id)
 
 
 class StatusPayload(BaseModel):
@@ -53,18 +83,22 @@ _US_TERMS = (
 _US_STATE_RE = re.compile(r",\s*[A-Z]{2}\b")
 
 
-def _matches_region(locations: list[str], region: str) -> bool:
+def _matches_region(locations: list[str], region: str, *, title: str = "") -> bool:
     blob = " ".join(locations or []).lower()
-    raw = " ".join(locations or [])
+    if title:
+        blob += " " + title.lower()
+    raw = " ".join(locations or []) + " " + title
     is_india = any(t in blob for t in _INDIA_TERMS)
+    is_us = any(t in blob for t in _US_TERMS) or bool(_US_STATE_RE.search(raw))
+    is_remote = "remote" in blob
+    if is_remote and not is_india and not is_us:
+        return True
     if region == "india":
         return is_india
     if region == "us":
         if is_india:
             return False
-        if any(t in blob for t in _US_TERMS):
-            return True
-        return bool(_US_STATE_RE.search(raw))
+        return is_us
     return True
 
 
@@ -74,12 +108,24 @@ def trigger_scrape(
     job_limit_per_company: int = Query(default=10, ge=1, le=50),
     region: str | None = Query(default=None, pattern="^(us|india)$"),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
+    search_terms: list[str] | None = None
+    resume = _resume_for(session, owner_hash)
+    prefs = _prefs_for(session, owner_hash)
+    profile = build_profile(resume, prefs)
+    if not profile.is_empty():
+        search_terms = search_terms_from_profile(profile)
+
+    match_profile = profile if not profile.is_empty() else None
+
     stats = scrape_yc_jobs(
         session,
         company_limit=company_limit,
         job_limit_per_company=job_limit_per_company,
         region=region,
+        search_terms=search_terms,
+        match_profile=match_profile,
     )
     total = session.exec(select(func.count(Job.id))).one()
     return {
@@ -87,13 +133,16 @@ def trigger_scrape(
         "jobs_seen": stats.jobs_seen,
         "jobs_inserted": stats.jobs_inserted,
         "jobs_updated": stats.jobs_updated,
+        "jobs_skipped": stats.jobs_skipped,
         "errors": stats.errors,
         "total_jobs_in_db": total,
     }
 
 
 @router.get("/count")
-def jobs_count(session: Session = Depends(get_session)) -> dict:
+def jobs_count(
+    session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)
+) -> dict:
     total = session.exec(select(func.count(Job.id))).one()
     return {"total": total}
 
@@ -109,50 +158,53 @@ def list_jobs(
     ),
     matched: bool = Query(default=True),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> list[dict]:
     all_rows = session.exec(select(Job).order_by(Job.scraped_at.desc())).all()
 
     if region:
-        all_rows = [j for j in all_rows if _matches_region(j.locations, region)]
+        all_rows = [j for j in all_rows if _matches_region(j.locations, region, title=j.title or "")]
 
+    states = _states_for(session, owner_hash, [j.id for j in all_rows if j.id is not None])
     if application_status and application_status != "all":
         if application_status == "active":
-            all_rows = [j for j in all_rows if j.application_status is None]
+            all_rows = [j for j in all_rows if states.get(j.id) is None or states[j.id].application_status is None]
         elif application_status == "starred":
-            all_rows = [j for j in all_rows if j.is_starred]
+            all_rows = [j for j in all_rows if states.get(j.id) is not None and states[j.id].is_starred]
         else:
-            all_rows = [j for j in all_rows if j.application_status == application_status]
+            all_rows = [j for j in all_rows if states.get(j.id) is not None and states[j.id].application_status == application_status]
 
-    scored: list[tuple[Job, float]] = []
+    scored: list[tuple[Job, float, dict]] = []
     if matched:
-        resume = session.exec(select(Resume).order_by(Resume.uploaded_at.desc())).first()
-        prefs = session.exec(select(JobPreferences)).first()
+        resume = _resume_for(session, owner_hash)
+        prefs = _prefs_for(session, owner_hash)
         profile = build_profile(resume, prefs)
-        if not profile.is_empty():
-            for j in all_rows:
-                s, breakdown = score_job(j, profile)
-                if passes_threshold(s, breakdown):
-                    scored.append((j, s))
-            scored.sort(key=lambda x: x[1], reverse=True)
-            page = scored[offset : offset + limit]
-            page_ids = [j.id for j, _ in page if j.id is not None]
-            kinds_map = _draft_kinds_for(session, page_ids)
-            return [
-                _serialize(j, score=_to_ten(s), draft_kinds=kinds_map.get(j.id, []))
-                for j, s in page
-            ]
+        if profile.is_empty():
+            return []
+        for j in all_rows:
+            s, breakdown = score_job(j, profile)
+            if passes_threshold(s, breakdown):
+                scored.append((j, s, breakdown))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        page = scored[offset : offset + limit]
+        page_ids = [j.id for j, _, _ in page if j.id is not None]
+        kinds_map = _draft_kinds_for(session, owner_hash, page_ids)
+        return [
+            _serialize(j, score=_to_ten(s), match_details=details, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id))
+            for j, s, details in page
+        ]
 
     page_rows = all_rows[offset : offset + limit]
     page_ids = [j.id for j in page_rows if j.id is not None]
-    kinds_map = _draft_kinds_for(session, page_ids)
-    return [_serialize(j, draft_kinds=kinds_map.get(j.id, [])) for j in page_rows]
+    kinds_map = _draft_kinds_for(session, owner_hash, page_ids)
+    return [_serialize(j, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id)) for j in page_rows]
 
 
-def _draft_kinds_for(session: Session, job_ids: list[int]) -> dict[int, list[str]]:
+def _draft_kinds_for(session: Session, owner_hash: str, job_ids: list[int]) -> dict[int, list[str]]:
     if not job_ids:
         return {}
     rows = session.exec(
-        select(Draft.job_id, Draft.kind).where(Draft.job_id.in_(job_ids))
+        select(Draft.job_id, Draft.kind).where(Draft.owner_hash == owner_hash, Draft.job_id.in_(job_ids))
     ).all()
     result: dict[int, list[str]] = {}
     for jid, kind in rows:
@@ -169,11 +221,12 @@ def draft_outreach(
     job_id: int,
     kind: str = Query(..., pattern="^(email|linkedin)$"),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
-    resume = session.exec(select(Resume).order_by(Resume.uploaded_at.desc())).first()
+    resume = _resume_for(session, owner_hash)
     if resume is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -190,7 +243,7 @@ def draft_outreach(
     try:
         if kind == "email":
             email = draft_email(job, resume)
-            _upsert_draft(session, job.id, kind, subject=email.subject, body=email.body)
+            _upsert_draft(session, owner_hash, job.id, kind, subject=email.subject, body=email.body)
             return {
                 "kind": "email",
                 "subject": email.subject,
@@ -200,7 +253,7 @@ def draft_outreach(
                 "cached": False,
             }
         message = draft_linkedin(job, resume)
-        _upsert_draft(session, job.id, kind, message=message)
+        _upsert_draft(session, owner_hash, job.id, kind, message=message)
         return {
             "kind": "linkedin",
             "message": message,
@@ -215,6 +268,7 @@ def draft_outreach(
 
 def _upsert_draft(
     session: Session,
+    owner_hash: str,
     job_id: int | None,
     kind: str,
     *,
@@ -225,12 +279,13 @@ def _upsert_draft(
     if job_id is None:
         return
     existing = session.exec(
-        select(Draft).where(Draft.job_id == job_id, Draft.kind == kind)
+        select(Draft).where(Draft.owner_hash == owner_hash, Draft.job_id == job_id, Draft.kind == kind)
     ).first()
     now = datetime.now(timezone.utc)
     if existing is None:
         session.add(
             Draft(
+                owner_hash=owner_hash,
                 job_id=job_id,
                 kind=kind,
                 subject=subject,
@@ -253,12 +308,13 @@ def get_cached_draft(
     job_id: int,
     kind: str = Query(..., pattern="^(email|linkedin)$"),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
     cached = session.exec(
-        select(Draft).where(Draft.job_id == job_id, Draft.kind == kind)
+        select(Draft).where(Draft.owner_hash == owner_hash, Draft.job_id == job_id, Draft.kind == kind)
     ).first()
     if cached is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cached draft.")
@@ -286,6 +342,7 @@ def get_cached_draft(
 def enrich_batch(
     payload: EnrichBatchPayload,
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict[int, dict]:
     if not payload.job_ids:
         return {}
@@ -294,7 +351,8 @@ def enrich_batch(
 
 
 def _serialize(
-    j: Job, *, score: float | None = None, draft_kinds: list[str] | None = None
+    j: Job, *, score: float | None = None, match_details: dict | None = None,
+    draft_kinds: list[str] | None = None, state: VisitorJobState | None = None,
 ) -> dict:
     out = {
         "id": j.id,
@@ -311,14 +369,15 @@ def _serialize(
         "tags": j.tags,
         "founders": j.founders or [],
         "contact_emails": j.contact_emails or [],
-        "application_status": j.application_status,
-        "status_updated_at": j.status_updated_at.isoformat() if j.status_updated_at else None,
-        "is_starred": bool(j.is_starred),
+        "application_status": state.application_status if state else None,
+        "status_updated_at": state.status_updated_at.isoformat() if state and state.status_updated_at else None,
+        "is_starred": bool(state.is_starred) if state else False,
         "source_url": j.source_url,
         "scraped_at": j.scraped_at.isoformat(),
     }
     if score is not None:
         out["match_score"] = round(score, 1)
+        out["match_details"] = match_details or {}
     return out
 
 
@@ -327,6 +386,7 @@ def update_status(
     job_id: int,
     payload: StatusPayload,
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
     job = session.get(Job, job_id)
     if job is None:
@@ -339,14 +399,15 @@ def update_status(
             detail=f"Invalid status. Allowed: {list(APPLICATION_STATUSES)} or null.",
         )
 
-    job.application_status = new_status
-    job.status_updated_at = datetime.now(timezone.utc) if new_status is not None else None
-    session.add(job)
+    state = _state_for(session, owner_hash, job_id)
+    state.application_status = new_status
+    state.status_updated_at = datetime.now(timezone.utc) if new_status is not None else None
+    session.add(state)
     session.commit()
-    session.refresh(job)
+    session.refresh(state)
     return {
-        "application_status": job.application_status,
-        "status_updated_at": job.status_updated_at.isoformat() if job.status_updated_at else None,
+        "application_status": state.application_status,
+        "status_updated_at": state.status_updated_at.isoformat() if state.status_updated_at else None,
     }
 
 
@@ -355,34 +416,49 @@ def update_star(
     job_id: int,
     payload: StarPayload,
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
-    job.is_starred = payload.is_starred
-    session.add(job)
+    state = _state_for(session, owner_hash, job_id)
+    state.is_starred = payload.is_starred
+    session.add(state)
     session.commit()
-    session.refresh(job)
-    return {"is_starred": bool(job.is_starred)}
+    session.refresh(state)
+    return {"is_starred": bool(state.is_starred)}
 
 
 @router.get("/status-counts")
 def status_counts(
     region: str | None = Query(default=None, pattern="^(us|india)$"),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict[str, int]:
     rows = session.exec(select(Job)).all()
     if region:
-        rows = [j for j in rows if _matches_region(j.locations, region)]
+        rows = [j for j in rows if _matches_region(j.locations, region, title=j.title or "")]
+
+    resume = _resume_for(session, owner_hash)
+    prefs = _prefs_for(session, owner_hash)
+    profile = build_profile(resume, prefs)
+    if profile.is_empty():
+        rows = []
+    else:
+        rows = [j for j in rows if passes_threshold(*score_job(j, profile))]
+
+    states = _states_for(session, owner_hash, [j.id for j in rows if j.id is not None])
+
     counts = {"all": len(rows), "active": 0, "starred": 0}
     for s in APPLICATION_STATUSES:
         counts[s] = 0
     for j in rows:
-        if j.application_status is None:
+        state = states.get(j.id)
+        if state is None or state.application_status is None:
             counts["active"] += 1
-        elif j.application_status in counts:
-            counts[j.application_status] += 1
-        if j.is_starred:
+        elif state.application_status in counts:
+            counts[state.application_status] += 1
+        if state and state.is_starred:
             counts["starred"] += 1
     return counts
 
@@ -392,6 +468,7 @@ def enrich_job(
     job_id: int,
     force: bool = Query(default=False),
     session: Session = Depends(get_session),
+    owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
     job = session.get(Job, job_id)
     if job is None:

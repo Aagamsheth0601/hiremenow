@@ -13,6 +13,7 @@ class JobPreferences(SQLModel, table=True):
     __tablename__ = "job_preferences"
 
     id: int | None = Field(default=None, primary_key=True)
+    owner_hash: str = Field(index=True, unique=True)
     target_roles: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     seniority: str | None = None
     locations: list[str] = Field(default_factory=list, sa_column=Column(JSON))

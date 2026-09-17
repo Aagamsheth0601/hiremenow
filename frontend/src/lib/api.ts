@@ -1,6 +1,39 @@
 export const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8000";
 
+const TOKEN_KEY = "hiremenow.visitorToken.v2";
+let tokenPromise: Promise<string> | null = null;
+
+async function visitorToken(): Promise<string> {
+  const saved = localStorage.getItem(TOKEN_KEY);
+  if (saved) return saved;
+  if (!tokenPromise) {
+    tokenPromise = fetch(`${BACKEND_URL}/sessions`, { method: "POST" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not start a private browser session.");
+        const data = (await response.json()) as { token: string };
+        localStorage.setItem(TOKEN_KEY, data.token);
+        return data.token;
+      })
+      .finally(() => { tokenPromise = null; });
+  }
+  return tokenPromise;
+}
+
+export async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await visitorToken();
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(url, { ...init, headers });
+  if (response.status !== 401) return response;
+
+  // The server may have started with a new database. Create a fresh session.
+  localStorage.removeItem(TOKEN_KEY);
+  const newToken = await visitorToken();
+  headers.set("Authorization", `Bearer ${newToken}`);
+  return fetch(url, { ...init, headers });
+}
+
 export type Experience = {
   title: string;
   company: string;
@@ -79,6 +112,13 @@ export type Job = {
   source_url: string;
   scraped_at: string;
   match_score?: number;
+  match_details?: {
+    matched_skills: string[];
+    missing_skills: string[];
+    matched_target_roles: string[];
+    skill_coverage: number;
+    role_in_title: boolean;
+  };
 };
 
 export type StatusCounts = Record<StatusFilter, number>;

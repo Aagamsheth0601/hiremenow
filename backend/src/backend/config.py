@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "hiremenow"
     debug: bool = False
 
-    database_url: str = "sqlite:///./hiremenow.db"
+    database_url: str = "sqlite:///./hiremenow-v2.db"
 
     frontend_url: str = "http://localhost:5173"
 
