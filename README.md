@@ -1,5 +1,7 @@
 # hiremenow
 
+[Live app](https://hiremenow-aagam.netlify.app) · [Source code](https://github.com/Aagamsheth0601/hiremenow)
+
 Upload a PDF résumé, review the extracted profile, and discover startup jobs ranked by role and skill fit. A visitor can optionally refine target roles, location, and work mode. The app also drafts an email (at most 1,000 characters) or LinkedIn message (at most 300 characters) for review and copying. It never sends messages automatically.
 
 ## Highlights
