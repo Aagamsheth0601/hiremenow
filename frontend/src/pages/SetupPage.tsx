@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import MatchFocusForm from "../components/MatchFocusForm";
 
@@ -22,6 +22,8 @@ export default function SetupPage() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [connectionError, setConnectionError] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const reviewRef = useRef<HTMLElement>(null);
 
   const chooseFile = (next: File | null) => {
     setResult(null);
@@ -82,13 +84,33 @@ export default function SetupPage() {
       target_roles: suggestedRoles,
       seniority: preferences?.seniority ?? null,
       locations: result.parsed.contact.location ? [result.parsed.contact.location] : [],
-      work_modes: preferences?.work_modes ?? [],
-      company_sizes: preferences?.company_sizes ?? [],
-      needs_visa_sponsorship: preferences?.needs_visa_sponsorship ?? false,
-      has_saved: preferences?.has_saved ?? false,
-      updated_at: preferences?.updated_at ?? null,
+      work_modes: [],
+      company_sizes: [],
+      needs_visa_sponsorship: false,
+      has_saved: false,
+      updated_at: null,
     };
   }, [preferences, result]);
+
+  useEffect(() => {
+    if (status === "done") reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [status]);
+
+  const skipPreferences = async () => {
+    setSkipping(true);
+    setError(null);
+    try {
+      const response = await apiFetch(`${BACKEND_URL}/preferences`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Could not skip preferences. Please try again.");
+      sessionStorage.removeItem("hiremenow.jobsAutoSearch.india");
+      sessionStorage.removeItem("hiremenow.jobsAutoSearch.us");
+      navigate("/jobs");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not skip preferences.");
+    } finally {
+      setSkipping(false);
+    }
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +138,9 @@ export default function SetupPage() {
       setResult(data);
       setStatus("done");
       setHasResume(true);
+      setPreferences(null);
+      sessionStorage.removeItem("hiremenow.jobsAutoSearch.india");
+      sessionStorage.removeItem("hiremenow.jobsAutoSearch.us");
       setConnectionError(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -229,20 +254,25 @@ export default function SetupPage() {
         </div>
       )}
 
-      {result && <ParsedView data={result} />}
-
-      {hasResume && focusInitial && (
-        <section className="rounded-[2rem] border border-[#cce3d0] bg-[#eaf4e9] p-6 shadow-[0_24px_55px_-40px_#173e35] sm:p-8">
+      {hasResume && focusInitial && (!file || status === "done") && (
+        <section ref={reviewRef} className="scroll-mt-24 rounded-[2rem] border border-[#cce3d0] bg-[#eaf4e9] p-6 shadow-[0_24px_55px_-40px_#173e35] sm:p-8">
           <div className="mb-6 max-w-2xl">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Your next step</p>
-            <h2 className="display-font mt-2 text-3xl text-[#173e35]">Review your match focus</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#537061]">We found a starting point in your resume. Adjust it if you like, or see your matches right away.</p>
+            <h2 className="display-font mt-2 text-3xl text-[#173e35]">Review your priorities</h2>
+            <p className="mt-2 text-sm leading-relaxed text-[#537061]">These suggestions came from your resume. Adjust them or skip to recommendations.</p>
           </div>
-          <MatchFocusForm initial={focusInitial} submitLabel="Save and discover jobs" onSaved={() => navigate("/jobs")} />
-          <Link to="/jobs" className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-[#173e35] underline-offset-4 hover:underline">
-            Skip for now — discover jobs
-          </Link>
+          <MatchFocusForm initial={focusInitial} submitLabel="Use these priorities — Discover Jobs" onSaved={() => navigate("/jobs")} />
+          <button type="button" onClick={skipPreferences} disabled={skipping} className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-[#173e35] underline-offset-4 hover:underline disabled:opacity-50">
+            {skipping ? "Opening jobs…" : "Skip preferences — Discover Jobs"}
+          </button>
         </section>
+      )}
+
+      {result && (
+        <details className="rounded-[1.5rem] border border-[#dce8dc] bg-white p-5 sm:p-6">
+          <summary className="cursor-pointer text-sm font-semibold text-[#285846]">See what we found in your resume</summary>
+          <div className="mt-5"><ParsedView data={result} /></div>
+        </details>
       )}
     </div>
   );

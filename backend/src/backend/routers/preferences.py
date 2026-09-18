@@ -144,6 +144,17 @@ def upsert_preferences(
     return _to_response(prefs, PreferencesPayload())
 
 
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def clear_preferences(
+    session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)
+) -> None:
+    """Use résumé suggestions again when the visitor skips refinements."""
+    prefs = session.exec(select(JobPreferences).where(JobPreferences.owner_hash == owner_hash)).first()
+    if prefs is not None:
+        session.delete(prefs)
+        session.commit()
+
+
 @router.post("/suggest-roles")
 def suggest_roles(
     session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)

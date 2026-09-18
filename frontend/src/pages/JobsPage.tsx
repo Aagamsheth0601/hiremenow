@@ -13,6 +13,7 @@ import {
   type ScrapeResult,
   type StatusCounts,
   type StatusFilter,
+  type UploadResponse,
 } from "../lib/api";
 
 const STATUS_OPTIONS: { value: ApplicationStatus; label: string; color: string }[] = [
@@ -175,12 +176,16 @@ export default function JobsPage() {
     ])
       .then(async ([preferencesResponse, resumesResponse]) => {
         if (!preferencesResponse.ok || !resumesResponse.ok) throw new Error("Could not load your private profile.");
-        return [await preferencesResponse.json() as Preferences, await resumesResponse.json() as unknown[]] as const;
+        return [await preferencesResponse.json() as Preferences, await resumesResponse.json() as UploadResponse[]] as const;
       })
       .then(([data, resumes]) => {
         if (cancelled) return;
         setPrefs(data);
         setHasResume(resumes.length > 0);
+        const location = (resumes[0]?.parsed.contact.location ?? "").toLowerCase();
+        if (/united states|\busa\b|\bu\.s\.\b|new york|san francisco|seattle|boston|austin/.test(location)) {
+          setRegion("us");
+        }
       })
       .catch((error) => {
         if (!cancelled) setProfileError(error instanceof Error ? error.message : "Could not load your profile.");
@@ -223,13 +228,13 @@ export default function JobsPage() {
     return timeAgo(newest.scraped_at);
   }, [jobs]);
 
-  const handleScrape = async () => {
+  const handleScrape = useCallback(async (automatic = false) => {
     setScraping(true);
     setScrapeMsg(null);
     setScrapeError(null);
     try {
       const res = await apiFetch(
-        `${BACKEND_URL}/jobs/scrape?company_limit=25&job_limit_per_company=5&region=${region}`,
+        `${BACKEND_URL}/jobs/scrape?company_limit=${automatic ? 10 : 25}&job_limit_per_company=5&region=${region}`,
         { method: "POST" },
       );
       if (!res.ok) throw new Error(`status ${res.status}`);
@@ -246,7 +251,15 @@ export default function JobsPage() {
     } finally {
       setScraping(false);
     }
-  };
+  }, [region, statusFilter, loadJobs, loadCounts]);
+
+  useEffect(() => {
+    if (prefsLoading || !hasResume || jobsLoading || jobsError || jobs.length > 0 || scraping || statusFilter !== "active") return;
+    const key = `hiremenow.jobsAutoSearch.${region}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+    void handleScrape(true);
+  }, [prefsLoading, hasResume, jobsLoading, jobsError, jobs.length, scraping, statusFilter, region, handleScrape]);
 
   if (prefsLoading) {
     return (
@@ -281,8 +294,8 @@ export default function JobsPage() {
               Discover jobs
             </h1>
             <p className="text-sm text-zinc-600">
-              {jobsLoading
-                ? "Loading jobs…"
+              {jobsLoading || (scraping && jobs.length === 0)
+                ? "Finding jobs that fit your resume…"
                 : `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}${
                     lastScrapedLabel ? ` · last scraped ${lastScrapedLabel}` : ""
                   }`}
@@ -303,11 +316,11 @@ export default function JobsPage() {
             </select>
             <button
               type="button"
-              onClick={handleScrape}
+              onClick={() => void handleScrape()}
               disabled={scraping}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
             >
-              {scraping ? "Scraping…" : "Scrape now"}
+              {scraping ? "Finding jobs…" : "Refresh jobs"}
             </button>
           </div>
         </div>
@@ -403,9 +416,9 @@ export default function JobsPage() {
 
       {jobsError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Could not load jobs: {jobsError}</p>}
 
-      {jobsLoading ? (
+      {jobsLoading || (scraping && jobs.length === 0) ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
-          Loading jobs…
+          Finding jobs that fit your resume…
         </div>
       ) : pagedJobs.length === 0 && !jobsError ? (
         <div className="rounded-[1.5rem] border border-dashed border-[#c7dec8] bg-white p-10 text-center">
@@ -421,7 +434,7 @@ export default function JobsPage() {
               ? "Choose All to see your other matches."
               : hasLocationOrMode
                 ? "Try a broader location or work mode in Refine my matches."
-                : "Try Scrape now to find fresh startup openings."}
+                : "Try Refresh jobs to find fresh startup openings."}
           </p>
           {hasLocationOrMode && (statusFilter === "active" || statusFilter === "all") && (
             <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#173e35] px-4 text-sm font-semibold text-white hover:bg-[#285846]">

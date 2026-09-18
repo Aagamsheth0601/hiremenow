@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from backend.db import get_session
-from backend.models import Resume
+from backend.models import Draft, JobPreferences, Resume, VisitorJobState
 from backend.services.resume_parser import ResumeParseError, extract_fields, parse_pdf
 from backend.visitor import get_visitor_hash
 
@@ -44,6 +45,11 @@ async def upload_resume(
         raw_text, parsed = parse_pdf(pdf_bytes)
     except ResumeParseError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+    # A replacement résumé starts a new match profile for this browser. Do this
+    # only after parsing succeeds so a failed upload keeps the previous profile.
+    for model in (Draft, VisitorJobState, JobPreferences, Resume):
+        session.exec(delete(model).where(model.owner_hash == owner_hash))
 
     resume = Resume(
         owner_hash=owner_hash,
