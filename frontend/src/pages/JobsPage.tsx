@@ -239,6 +239,9 @@ export default function JobsPage() {
       );
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data: ScrapeResult = await res.json();
+      if (data.errors > 0 && data.companies_visited === 0) {
+        throw new Error("The YC job source is unavailable right now. Please retry later.");
+      }
       const regionLabel = region === "india" ? "India" : "US";
       setScrapeMsg(
         `Scraped ${data.companies_visited} ${regionLabel} companies — ${data.jobs_inserted} new, ${data.jobs_updated} updated (total ${data.total_jobs_in_db}).`,

@@ -88,8 +88,8 @@ def _matches_region(locations: list[str], region: str, *, title: str = "") -> bo
     if title:
         blob += " " + title.lower()
     raw = " ".join(locations or []) + " " + title
-    is_india = any(t in blob for t in _INDIA_TERMS)
-    is_us = any(t in blob for t in _US_TERMS) or bool(_US_STATE_RE.search(raw))
+    is_india = any(t in blob for t in _INDIA_TERMS) or bool(re.search(r"\bIN\b", raw))
+    is_us = any(t in blob for t in _US_TERMS) or bool(re.search(r"\bUS\b", raw)) or bool(_US_STATE_RE.search(raw))
     is_remote = "remote" in blob
     if is_remote and not is_india and not is_us:
         return True

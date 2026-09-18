@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import ipaddress
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -357,6 +358,54 @@ def _parse_company_jobs(html: str, company_slug: str) -> list[str]:
     return paths
 
 
+def _public_job_listings(client: httpx.Client, *, region: str | None, search_terms: list[str] | None, company_limit: int) -> list[dict[str, Any]]:
+    """Read YC's public jobs page; the old embedded Algolia key has expired."""
+    path = "/jobs/role/all/india" if region == "india" else "/jobs/role/all"
+    response = client.get(f"{YC_BASE}{path}", timeout=20.0)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    candidates: list[tuple[float, dict[str, Any], str]] = []
+    terms = [set(re.findall(r"[a-z0-9]+", term.lower())) for term in (search_terms or [])]
+    for link in soup.select('a[href*="/jobs/"]'):
+        job_path = link.get("href") or ""
+        match = re.fullmatch(r"/companies/([^/]+)/jobs/[^/]+/?", job_path)
+        if not match or link.parent is None:
+            continue
+        slug = match.group(1)
+        company_link = link.parent.select_one(f'a[href="/companies/{slug}"]')
+        company_text = company_link.get_text(" ", strip=True) if company_link else slug.replace("-", " ")
+        name = re.split(r"\s+\([SW]\d+\)", company_text, maxsplit=1)[0].strip()
+        one_liner = company_text.split("•", 1)[-1].strip() if "•" in company_text else ""
+        meta = link.find_next_sibling("div")
+        meta_text = meta.get_text(" ", strip=True) if meta else ""
+        location = meta_text.rsplit("•", 1)[-1].strip() if meta_text else ""
+        location_lc = location.lower()
+        if region == "india" and not re.search(r"\bindia\b|\bin\b|bengaluru|bangalore|mumbai|hyderabad|delhi|pune|gurugram|chennai", location_lc):
+            continue
+        if region == "us" and not re.search(r"\bus\b|united states|san francisco|new york|seattle|boston|austin|chicago|los angeles", location_lc):
+            continue
+        title = link.get_text(" ", strip=True)
+        title_tokens = set(re.findall(r"[a-z0-9]+", title.lower()))
+        relevance = max((len(title_tokens & term) / len(term) for term in terms if term), default=0.0)
+        company = {"slug": slug, "name": name or slug, "one_liner": one_liner, "all_locations": location, "_job_paths": [], "_job_locations": {}}
+        candidates.append((relevance, company, job_path))
+    if not candidates:
+        raise RuntimeError("YC public jobs page returned no readable listings.")
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    companies: dict[str, dict[str, Any]] = {}
+    for _, company, job_path in candidates:
+        slug = company["slug"]
+        if slug not in companies:
+            if len(companies) >= company_limit:
+                continue
+            companies[slug] = company
+        selected = companies[slug]
+        if job_path not in selected["_job_paths"]:
+            selected["_job_paths"].append(job_path)
+            selected["_job_locations"][job_path] = company["all_locations"]
+    return list(companies.values())
+
+
 def _parse_job_page(html: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -461,24 +510,10 @@ def scrape_yc_jobs(
         http2=False,
     ) as client:
         try:
-            if search_terms:
-                hits_per_query = max(10, min(25, company_limit // len(search_terms) + 5))
-                companies = _algolia_search_multi(
-                    client,
-                    search_terms=search_terms,
-                    hits_per_query=hits_per_query,
-                    region=region,
-                )[:company_limit]
-                log.info(
-                    "targeted scrape: %d terms -> %d unique companies",
-                    len(search_terms), len(companies),
-                )
-            else:
-                companies = _algolia_search_hiring(
-                    client, hits_per_page=company_limit, region=region
-                )
-        except httpx.HTTPError as e:
-            log.error("algolia search failed: %s", e)
+            companies = _public_job_listings(client, region=region, search_terms=search_terms, company_limit=company_limit)
+            log.info("YC public listings: %d companies for %s", len(companies), region or "all")
+        except (httpx.HTTPError, RuntimeError) as e:
+            log.error("YC public jobs search failed: %s", e)
             stats.errors += 1
             return stats
 
@@ -488,19 +523,8 @@ def scrape_yc_jobs(
                 continue
             stats.companies_visited += 1
 
-            company_url = f"{YC_BASE}/companies/{slug}"
-            html = _fetch(client, company_url)
-            time.sleep(REQUEST_DELAY_SECONDS)
-            if html is None:
-                stats.errors += 1
-                continue
-
-            company_founders = _parse_company_founders(html)
-            company_emails = _discover_emails(client, company.get("website"))
-            company["_founders"] = company_founders
-            company["_contact_emails"] = company_emails
-
-            job_paths = _parse_company_jobs(html, slug)[:job_limit_per_company]
+            # Contact details are enriched on demand when a visitor drafts outreach.
+            job_paths = company["_job_paths"][:job_limit_per_company]
 
             for path in job_paths:
                 stats.jobs_seen += 1
@@ -512,6 +536,7 @@ def scrape_yc_jobs(
                     continue
                 try:
                     parsed = _parse_job_page(job_html)
+                    company["all_locations"] = company["_job_locations"].get(path, "")
                     if match_profile:
                         temp = Job(
                             title=parsed["title"] or "Untitled role",
