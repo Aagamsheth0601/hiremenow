@@ -51,5 +51,3 @@ cd frontend
 npm ci
 npm run dev
 ```
-
-Open `http://127.0.0.1:5173`. The API health check is `http://127.0.0.1:8000/health`.
