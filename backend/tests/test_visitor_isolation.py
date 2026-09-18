@@ -85,6 +85,17 @@ def test_two_browsers_cannot_read_each_others_private_data() -> None:
         assert client.get("/jobs/status-counts?region=india", headers=a).json()["applied"] == 1
         assert client.get("/jobs/status-counts?region=india", headers=b).json()["all"] == 0
 
+        refinements = {"target_roles": ["Backend Engineer"], "locations": ["Pune, India"], "work_modes": []}
+        assert client.put("/preferences", headers=a, json=refinements).status_code == 200
+        assert client.get("/jobs?region=india", headers=a).json() == []
+        refinements["locations"] = ["Mumbai, India"]
+        refinements["work_modes"] = ["remote"]
+        assert client.put("/preferences", headers=a, json=refinements).status_code == 200
+        assert client.get("/jobs?region=india", headers=a).json() == []
+        refinements["work_modes"] = []
+        assert client.put("/preferences", headers=a, json=refinements).status_code == 200
+        assert len(client.get("/jobs?region=india", headers=a).json()) == 1
+
         # A returning visitor keeps their data after a few hours.
         with Session(engine) as db:
             visitor_a = db.get(VisitorSession, _hash_token(token_a))

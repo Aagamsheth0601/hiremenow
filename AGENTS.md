@@ -13,3 +13,6 @@
 | A malformed-token test failed in the HTTP client before reaching the API. | HTTP header values must be ASCII. | Used an invalid ASCII token to exercise API validation. |
 | The old SQLite file could not be removed. | The local uvicorn process still held the database open. | Stopped the verified HireMeNow process, removed the old database, and checked that the fresh database starts empty. |
 | A checkout smoke test said `visitor_sessions` did not exist. | The test client was created without entering the app lifespan, so startup did not create tables. | Entered the test client lifespan and reran the health, session, and empty-data checks. |
+| Outreach drafts included one developer's past employer and achievements for every visitor. | The LinkedIn prompt and fallback were hardcoded for the original résumé. | Replaced them with resume-based text and enforced 300/1,000-character limits with tests. |
+| A filtered list with zero matches said there were no jobs in the database. | The empty state ignored active refinements and status filters. | Show a context-specific message and a direct way to refine matches. |
+| The preview browser sometimes closed during screenshot checks. | The Playwright browser context or local preview server ended between calls. | Restarted the isolated preview and verified the UI at 390, 768, and 1280 pixels. |

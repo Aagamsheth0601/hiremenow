@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import MatchFocusForm from "../components/MatchFocusForm";
 
 import {
   apiFetch,
@@ -81,8 +82,12 @@ function timeAgo(iso: string): string {
 export default function JobsPage() {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(true);
+  const [hasResume, setHasResume] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [refineOpen, setRefineOpen] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
@@ -91,7 +96,6 @@ export default function JobsPage() {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(0);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
-  const enrichRequestedRef = useRef<Set<number>>(new Set());
 
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
     try {
@@ -108,6 +112,7 @@ export default function JobsPage() {
   const loadJobs = useCallback(
     async (regionParam: "india" | "us", statusParam: StatusFilter) => {
       setJobsLoading(true);
+      setJobsError(null);
       try {
         const res = await apiFetch(
           `${BACKEND_URL}/jobs?limit=200&region=${regionParam}&application_status=${statusParam}`,
@@ -116,7 +121,7 @@ export default function JobsPage() {
         const data: Job[] = await res.json();
         setJobs(data);
       } catch (err) {
-        console.error("failed to load jobs", err);
+        setJobsError(err instanceof Error ? err.message : "Could not load jobs.");
       } finally {
         setJobsLoading(false);
       }
@@ -164,10 +169,21 @@ export default function JobsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch(`${BACKEND_URL}/preferences`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled) setPrefs(data);
+    Promise.all([
+      apiFetch(`${BACKEND_URL}/preferences`),
+      apiFetch(`${BACKEND_URL}/resumes`),
+    ])
+      .then(async ([preferencesResponse, resumesResponse]) => {
+        if (!preferencesResponse.ok || !resumesResponse.ok) throw new Error("Could not load your private profile.");
+        return [await preferencesResponse.json() as Preferences, await resumesResponse.json() as unknown[]] as const;
+      })
+      .then(([data, resumes]) => {
+        if (cancelled) return;
+        setPrefs(data);
+        setHasResume(resumes.length > 0);
+      })
+      .catch((error) => {
+        if (!cancelled) setProfileError(error instanceof Error ? error.message : "Could not load your profile.");
       })
       .finally(() => {
         if (!cancelled) setPrefsLoading(false);
@@ -185,53 +201,6 @@ export default function JobsPage() {
   useEffect(() => {
     loadCounts(region);
   }, [loadCounts, region]);
-
-  useEffect(() => {
-    enrichRequestedRef.current = new Set();
-  }, [region, statusFilter]);
-
-  useEffect(() => {
-    if (jobs.length === 0) return;
-    const targets = jobs
-      .filter(
-        (j) =>
-          j.founders.length === 0 &&
-          j.contact_emails.length === 0 &&
-          !enrichRequestedRef.current.has(j.id),
-      )
-      .slice(0, 20)
-      .map((j) => j.id);
-    if (targets.length === 0) return;
-    targets.forEach((id) => enrichRequestedRef.current.add(id));
-
-    let cancelled = false;
-    apiFetch(`${BACKEND_URL}/jobs/enrich-batch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_ids: targets, force: false }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: Record<string, { founders: Job["founders"]; contact_emails: string[] }> | null) => {
-        if (cancelled || !data) return;
-        setJobs((prev) =>
-          prev.map((j) => {
-            const enriched = data[String(j.id)];
-            return enriched
-              ? {
-                  ...j,
-                  founders: enriched.founders,
-                  contact_emails: enriched.contact_emails,
-                }
-              : j;
-          }),
-        );
-      })
-      .catch((err) => console.error("batch enrich failed", err));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [jobs]);
 
   const JOBS_PER_PAGE = 30;
 
@@ -287,22 +256,21 @@ export default function JobsPage() {
     );
   }
 
-  if (!prefs?.has_saved) {
+  if (profileError) {
+    return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">{profileError}</div>;
+  }
+
+  if (!hasResume) {
     return (
-      <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center">
-        <p className="text-sm font-medium text-zinc-700">
-          Save your preferences first.
-        </p>
-        <p className="mt-2 text-xs text-zinc-500">
-          Head to{" "}
-          <Link to="/" className="text-zinc-900 underline hover:text-zinc-700">
-            Setup
-          </Link>{" "}
-          and save your preferences — matched jobs will populate here.
-        </p>
+      <div className="rounded-2xl border border-[#cce3d0] bg-white p-8 text-center">
+        <h1 className="display-font text-3xl text-[#173e35]">Start with your resume.</h1>
+        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#688075]">Upload a PDF to get matches based on your experience. You can refine them later.</p>
+        <Link to="/" className="mt-6 inline-flex min-h-11 items-center rounded-xl bg-[#173e35] px-5 py-2.5 text-sm font-semibold text-white">Upload my resume</Link>
       </div>
     );
   }
+
+  const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 
   return (
     <div className="flex flex-col gap-6">
@@ -310,7 +278,7 @@ export default function JobsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-              Jobs
+              Discover jobs
             </h1>
             <p className="text-sm text-zinc-600">
               {jobsLoading
@@ -320,8 +288,7 @@ export default function JobsPage() {
                   }`}
             </p>
             <p className="text-xs text-zinc-500">
-              Sorted by match score (out of 10, {sortDir === "desc" ? "highest first" : "lowest first"}) — overlap of job title and
-              description with your resume skills and saved target roles.
+              Ranked by role fit and skills found in the job post. See why each opening matches your resume.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -355,6 +322,41 @@ export default function JobsPage() {
           </p>
         )}
       </header>
+
+      <section className="rounded-2xl border border-[#dce8dc] bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-[#173e35]">Matches shaped by your resume</h2>
+            <p className="mt-1 text-xs leading-5 text-[#688075]">
+              {prefs?.has_saved ? "Your refinements are applied. You can change them anytime." : "We used the roles and skills found in your resume. Fine-tuning is optional."}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-expanded={refineOpen}
+            aria-controls="refine-matches"
+            onClick={() => setRefineOpen((open) => !open)}
+            className="min-h-10 shrink-0 rounded-xl border border-[#c7dec8] bg-[#f2f8f0] px-4 py-2 text-sm font-semibold text-[#285846] hover:bg-[#e6f2e5]"
+          >
+            {refineOpen ? "Close refinements" : "Refine my matches"}
+          </button>
+        </div>
+        {refineOpen && prefs && (
+          <div id="refine-matches" className="mt-5 border-t border-[#e5eee5] pt-5">
+            <MatchFocusForm
+              initial={prefs}
+              submitLabel="Apply refinements"
+              onSaved={async (updated) => {
+                setPrefs(updated);
+                setRefineOpen(false);
+                setPage(0);
+                await loadJobs(region, statusFilter);
+                await loadCounts(region);
+              }}
+            />
+          </div>
+        )}
+      </section>
 
       <p className="text-xs text-zinc-500">
         Drafts are AI-generated and never sent automatically — copy & review
@@ -399,20 +401,37 @@ export default function JobsPage() {
         </button>
       </div>
 
+      {jobsError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Could not load jobs: {jobsError}</p>}
+
       {jobsLoading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Loading jobs…
         </div>
-      ) : pagedJobs.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-zinc-700">No jobs yet.</p>
-          <p className="mt-2 text-xs text-zinc-500">
-            Hit “Scrape now” to pull the latest YC openings.
+      ) : pagedJobs.length === 0 && !jobsError ? (
+        <div className="rounded-[1.5rem] border border-dashed border-[#c7dec8] bg-white p-10 text-center">
+          <p className="text-sm font-semibold text-[#173e35]">
+            {statusFilter !== "active" && statusFilter !== "all"
+              ? "No jobs in this list yet."
+              : hasLocationOrMode
+                ? "No jobs match your current focus."
+                : "No matching jobs found yet."}
           </p>
+          <p className="mt-2 text-xs text-[#688075]">
+            {statusFilter !== "active" && statusFilter !== "all"
+              ? "Choose All to see your other matches."
+              : hasLocationOrMode
+                ? "Try a broader location or work mode in Refine my matches."
+                : "Try Scrape now to find fresh startup openings."}
+          </p>
+          {hasLocationOrMode && (statusFilter === "active" || statusFilter === "all") && (
+            <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#173e35] px-4 text-sm font-semibold text-white hover:bg-[#285846]">
+              Refine my matches
+            </button>
+          )}
         </div>
       ) : (
         <>
-          <ul className="flex flex-col gap-3">
+          <ul className="grid gap-4 lg:grid-cols-2">
             {pagedJobs.map((job) => (
               <JobCard
                 key={job.id}
@@ -656,11 +675,24 @@ function JobCard({
 
   const emailDraft = draft.status === "ready" && draft.draft.kind === "email" ? draft.draft : null;
   const linkedInDraft = draft.status === "ready" && draft.draft.kind === "linkedin" ? draft.draft : null;
+  const fitLevel = (job.match_score ?? 0) >= 7 ? "strong" : (job.match_score ?? 0) >= 4 ? "medium" : "low";
+  const fitStyle = {
+    strong: { background: "bg-[#e4f3e7]", badge: "bg-[#e4f3e7] text-[#246342]", label: "Strong fit" },
+    medium: { background: "bg-[#fff1d9]", badge: "bg-[#fff1d9] text-[#805315]", label: "Medium fit" },
+    low: { background: "bg-[#e9eef3]", badge: "bg-[#e9eef3] text-[#486176]", label: "Low fit" },
+  }[fitLevel];
 
   return (
-    <li className="group rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
-      <div className="flex items-start gap-4">
-        <div className="flex flex-1 flex-col gap-1">
+    <li className={`group rounded-[2rem] p-3 shadow-[0_22px_50px_-38px_#173e35] transition hover:-translate-y-0.5 hover:shadow-[0_26px_55px_-36px_#173e35] sm:p-5 ${fitStyle.background}`}>
+      <div className="rounded-[1.5rem] bg-white p-4 shadow-sm sm:p-6">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-[#e2eee5] pb-4">
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Your match preview</span>
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${fitStyle.badge}`}>
+            {fitStyle.label}{job.match_score !== undefined ? ` · ${job.match_score}/10` : ""}
+          </span>
+        </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -679,20 +711,6 @@ function JobCard({
             >
               {job.title}
             </a>
-            {job.match_score !== undefined && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  job.match_score >= 7
-                    ? "bg-emerald-100 text-emerald-800"
-                    : job.match_score >= 4
-                    ? "bg-amber-50 text-amber-800"
-                    : "bg-zinc-100 text-zinc-700"
-                }`}
-                title="Match score out of 10 — overlap between job title/description and your resume skills + saved target roles."
-              >
-                {job.match_score}/10
-              </span>
-            )}
           </div>
           <p className="text-sm text-zinc-700">
             <span className="font-medium text-zinc-900">{job.company_name}</span>
@@ -726,15 +744,15 @@ function JobCard({
           )}
 
           {job.match_details && (
-            <details className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm">
-              <summary className="cursor-pointer font-medium text-emerald-950">
-                Why this match
-                {job.match_details.matched_skills.length > 0 && (
-                  <span className="ml-2 font-normal text-emerald-800">
-                    {job.match_details.matched_skills.slice(0, 3).join(" · ")}
-                  </span>
-                )}
-              </summary>
+            <div className="mt-5 border-t border-[#e2eee5] pt-4">
+              <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Why it fits</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {job.match_details.matched_skills.length > 0 ? job.match_details.matched_skills.slice(0, 5).map((skill) => (
+                  <span key={skill} className={`rounded-full px-3 py-1 text-xs font-medium ${fitStyle.badge}`}>{skill}</span>
+                )) : <span className="text-xs text-[#6d8074]">No exact skill overlap found in the extracted text.</span>}
+              </div>
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer text-xs font-semibold text-[#285846] underline-offset-2 hover:underline">See match details</summary>
               <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-700">
                 {job.match_details.matched_target_roles.length > 0 && (
                   <p>Role match: {job.match_details.matched_target_roles.join(", ")}</p>
@@ -745,7 +763,8 @@ function JobCard({
                 )}
                 <p className="text-slate-500">This score uses extracted text and is a guide, not an employer assessment.</p>
               </div>
-            </details>
+              </details>
+            </div>
           )}
 
           {job.founders.length > 0 ? (
@@ -807,7 +826,7 @@ function JobCard({
           )}
         </div>
 
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-start gap-2 sm:items-end">
           <span className="text-xs text-zinc-400">
             Job posted {timeAgo(job.scraped_at)}
           </span>
@@ -1049,6 +1068,7 @@ function JobCard({
           </div>
         </div>
       )}
+      </div>
     </li>
   );
 }

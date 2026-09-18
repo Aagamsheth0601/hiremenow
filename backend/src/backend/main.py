@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import get_settings
 from backend.db import init_db
+from backend.rate_limit import guard_expensive_actions
 from backend.routers import jobs, preferences, resumes
 from backend.visitor import router as sessions_router
 
@@ -22,6 +23,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app.middleware("http")(guard_expensive_actions)
 
 
 @app.middleware("http")
@@ -31,13 +33,10 @@ async def prevent_private_response_caching(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     return response
 
-_cors_origins = list({
-    settings.frontend_url,
-    settings.frontend_url.replace("localhost", "127.0.0.1"),
-    settings.frontend_url.replace("127.0.0.1", "localhost"),
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-})
+_frontend_origin = settings.frontend_url.rstrip("/")
+_cors_origins = [_frontend_origin]
+if _frontend_origin.startswith(("http://localhost:", "http://127.0.0.1:")):
+    _cors_origins.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
 
 app.add_middleware(
     CORSMiddleware,

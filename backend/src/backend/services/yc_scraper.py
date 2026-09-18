@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import ipaddress
+import socket
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -204,17 +207,36 @@ _EMAIL_PRIORITY = ("careers@", "jobs@", "hiring@", "recruit@", "talent@",
                    "founders@", "hello@", "contact@", "team@", "info@")
 
 
+def _public_company_url(raw: str) -> str | None:
+    """Reject local/private targets before fetching a company contact page."""
+    candidate = raw if raw.startswith(("https://", "http://")) else "https://" + raw
+    parsed = urlsplit(candidate)
+    host = parsed.hostname
+    if parsed.scheme not in ("http", "https") or not host or parsed.username or parsed.password:
+        return None
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return None
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except (socket.gaierror, ValueError, OSError):
+        return None
+    if not addresses or any(not ipaddress.ip_address(info[4][0]).is_global for info in addresses):
+        return None
+    return candidate.rstrip("/")
+
+
 def _discover_emails(client: httpx.Client, website: str | None) -> list[str]:
     if not website:
         return []
-    if not website.startswith(("http://", "https://")):
-        website = "https://" + website
-    base = website.rstrip("/")
+    base = _public_company_url(website)
+    if not base:
+        return []
     found: set[str] = set()
     for path in _EMAIL_PATHS:
         url = base + path
         try:
-            r = client.get(url, timeout=8.0, follow_redirects=True)
+            # Do not follow an external redirect to a private network host.
+            r = client.get(url, timeout=8.0, follow_redirects=False)
             if r.status_code != 200:
                 continue
             soup = BeautifulSoup(r.text, "html.parser")

@@ -22,7 +22,7 @@ class EmailDraft(BaseModel):
 _EMAIL_SYSTEM = """You draft cold outreach emails for a candidate applying to a specific job. Tone: warm, direct, professional — not stiff, not gimmicky.
 
 Hard rules:
-- 110-180 words in the body. No more.
+- Entire email body must be at most 1000 characters.
 - Subject line: 6-10 words, specific to the role and the candidate's strongest relevant angle. No clickbait.
 - Open with a greeting. If a hiring manager or founder name is provided, use it. Otherwise use "Hi {{Company}} team,".
 - 1-2 sentences on why this role/company specifically (use the company one-liner and the role).
@@ -35,25 +35,13 @@ Hard rules:
 
 Return ONLY a JSON object: {"subject": "...", "body": "..."}."""
 
-_LINKEDIN_SYSTEM = """You write a compelling LinkedIn message for a candidate reaching out about a specific role at a startup.
-
-Output a single JSON object with exactly one key, "message", whose value is the message text. The message should be 600-900 characters.
-
-Structure (flow naturally, do NOT use headers or bullet points):
-1. Open with "Hi [first name]," if a founder/recruiter name is provided, otherwise "Hi {{Company}} team,".
-2. Reference the company and the specific role. Say something specific about WHY this company excites you — use the company one-liner, industry, or job description to show genuine interest.
-3. Highlight the candidate's relevant experience. Specifically mention their work at Accenture supporting Goldman Sachs production systems — debugging distributed workflow failures, resolving 100+ tickets/month, mentoring junior engineers, and driving fixes end-to-end. Frame this as production-grade engineering experience.
-4. Explain why you'd be a good fit for THIS specific role — draw concrete connections between the job description and the candidate's skills/experience.
-5. Share motivation: after working in large MNCs, the candidate is looking for exposure in a startup environment — they want growth, a fast-paced environment, and the chance to make a direct impact.
-6. Close with personal values: honesty, hard work, and a genuine eagerness to learn and contribute. End with a soft ask to connect or chat.
-7. Sign off with the candidate's first name.
-
-Hard rules:
-- Do NOT invent skills, employers, or accomplishments. Use only what's in the resume.
-- Do NOT use emoji, markdown, or bullet points. Write it as a natural flowing message.
-- Do NOT use generic filler. Every sentence should be specific to either the candidate or the company.
-
-Return ONLY the JSON object — no prose, no markdown fences."""
+_LINKEDIN_SYSTEM = """Draft a brief LinkedIn connection message about the target job.
+Use only candidate experience that appears in the supplied resume and only company details
+that appear in the job information. Never infer a specific employer or achievement.
+Mention the role, one relevant skill or experience, and a short invitation to connect.
+Use a founder's first name only when provided. Sign with the candidate's first name if known.
+Keep the entire message at or below 300 characters, including spaces.
+Return only JSON with one string field named message."""
 
 
 def _client() -> OpenAI:
@@ -220,7 +208,7 @@ def _email_template_fallback(job: Job, resume: Resume) -> EmailDraft:
         body_parts.extend(["", skill_pitch])
     body_parts.extend(["", cta, "", sign])
 
-    return EmailDraft(subject=subject, body="\n".join(body_parts))
+    return EmailDraft(subject=subject, body="\n".join(body_parts)[:1000])
 
 
 def draft_email(job: Job, resume: Resume) -> EmailDraft:
@@ -241,7 +229,7 @@ def draft_email(job: Job, resume: Resume) -> EmailDraft:
             if (
                 email.subject
                 and len(email.subject.strip()) >= 5
-                and len(email.body.strip()) >= 200
+                and 0 < len(email.body.strip()) <= 1000
             ):
                 return email
         except ValidationError:
@@ -255,48 +243,16 @@ def draft_email(job: Job, resume: Resume) -> EmailDraft:
 def _linkedin_template(job: Job, resume: Resume) -> str:
     parsed = resume.parsed or {}
     contact = parsed.get("contact") or {}
-    skills = [s for s in (parsed.get("skills") or []) if isinstance(s, str)][:5]
-    experience = parsed.get("experience") or []
-
-    founder_first = None
-    if job.founders:
-        first_founder = next(
-            (f for f in job.founders if isinstance(f, dict) and f.get("name")),
-            None,
-        )
-        if first_founder:
-            founder_first = first_founder["name"].split()[0]
-
-    greeting = f"Hi {founder_first}," if founder_first else f"Hi {job.company_name} team,"
-    skill_blob = ", ".join(skills) if skills else "the relevant tech stack"
-    name = (contact.get("name") or "").strip()
-    first_name = name.split()[0] if name else "Aagam"
-    one_liner = (job.company_one_liner or "").strip().rstrip(".")
-
-    exp_line = ""
-    for e in experience[:2]:
-        if isinstance(e, dict) and e.get("title") and e.get("company"):
-            exp_line = f"In my current role as {e['title']} at {e['company']}, I've been working on debugging and resolving issues in distributed production systems, handling 100+ tickets monthly, and mentoring junior engineers. "
-            break
-
-    company_line = (
-        f"I came across {job.company_name}'s {job.title} role and I'm genuinely excited about it"
-        + (f" — {one_liner} is exactly the kind of problem I want to work on. " if one_liner else ". ")
-    )
-
-    fit_line = f"My background in {skill_blob} aligns well with what you're building, and I'd love the chance to contribute. "
-
-    motivation = (
-        "After working in large MNCs, I'm looking for startup exposure where I can grow fast, "
-        "make a direct impact, and be part of a team that moves quickly. "
-    )
-
-    closing = (
-        "I bring honesty, hard work, and a genuine eagerness to learn. "
-        f"Would love to connect and chat about how I could add value.\n\n— {first_name}"
-    )
-
-    return f"{greeting} {company_line}{exp_line}{fit_line}{motivation}{closing}"
+    name = (contact.get("name") or "").strip().split()
+    skills = [skill for skill in (parsed.get("skills") or []) if isinstance(skill, str)]
+    founder = next((f for f in (job.founders or []) if isinstance(f, dict) and f.get("name")), None)
+    greeting = f"Hi {founder['name'].split()[0]}," if founder else "Hi,"
+    role = (job.title or "the open role")[:65]
+    company = (job.company_name or "your company")[:50]
+    skill = skills[0][:45] if skills else "my experience"
+    signoff = f" I'm {name[0]}." if name else ""
+    message = f"{greeting} I'm interested in the {role} role at {company}. My background in {skill} looks relevant. Would you be open to connecting?{signoff}"
+    return message[:300]
 
 
 def draft_linkedin(job: Job, resume: Resume) -> str:
@@ -318,7 +274,7 @@ def draft_linkedin(job: Job, resume: Resume) -> str:
         msg = data.get("message") if isinstance(data, dict) else None
         if isinstance(msg, str):
             msg = msg.strip()
-            if len(msg) >= 100:
+            if 0 < len(msg) <= 300:
                 return msg
             _log.warning("linkedin LLM message too short (%d chars), using template", len(msg))
         else:

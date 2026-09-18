@@ -6,10 +6,16 @@ from sqlmodel import Session, SQLModel, create_engine
 from backend.config import get_settings
 
 _settings = get_settings()
+database_url = _settings.database_url
+# Neon supplies a standard postgresql:// URL. Select the installed psycopg v3
+# driver explicitly instead of depending on the older psycopg2 driver.
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 engine = create_engine(
-    _settings.database_url,
+    database_url,
     echo=_settings.debug,
+    pool_pre_ping=True,
     connect_args={"check_same_thread": False}
     if _settings.database_url.startswith("sqlite")
     else {},

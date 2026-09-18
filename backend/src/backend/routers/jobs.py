@@ -102,6 +102,42 @@ def _matches_region(locations: list[str], region: str, *, title: str = "") -> bo
     return True
 
 
+def _matches_refinements(job: Job, prefs: JobPreferences | None) -> bool:
+    """Apply only the optional controls exposed in Refine my matches."""
+    if prefs is None:
+        return True
+    where = " ".join(job.locations or []).lower()
+    mode_text = " ".join([where, job.title.lower(), " ".join(job.tags or []).lower()])
+
+    if prefs.locations:
+        city_or_country = prefs.locations[0].split(",", 1)[0].strip().lower()
+        if city_or_country:
+            aliases = {
+                "us": ("united states", "usa", " us "),
+                "in": ("india",),
+            }.get(city_or_country, (city_or_country,))
+            location_matches = any(alias in f" {where} " for alias in aliases)
+            # A remote job can still suit a city preference when the visitor
+            # explicitly asked to see remote work.
+            remote_exception = "remote" in (prefs.work_modes or []) and "remote" in mode_text
+            if not location_matches and not remote_exception:
+                return False
+
+    if prefs.work_modes:
+        mode_terms = {
+            "remote": ("remote",),
+            "hybrid": ("hybrid",),
+            "on-site": ("on-site", "onsite", "on site", "in-office", "in office"),
+        }
+        if not any(
+            term in mode_text
+            for mode in prefs.work_modes
+            for term in mode_terms.get(mode, ())
+        ):
+            return False
+    return True
+
+
 @router.post("/scrape")
 def trigger_scrape(
     company_limit: int = Query(default=10, ge=1, le=200),
@@ -165,6 +201,10 @@ def list_jobs(
     if region:
         all_rows = [j for j in all_rows if _matches_region(j.locations, region, title=j.title or "")]
 
+    prefs = _prefs_for(session, owner_hash) if matched else None
+    if matched:
+        all_rows = [j for j in all_rows if _matches_refinements(j, prefs)]
+
     states = _states_for(session, owner_hash, [j.id for j in all_rows if j.id is not None])
     if application_status and application_status != "all":
         if application_status == "active":
@@ -177,7 +217,6 @@ def list_jobs(
     scored: list[tuple[Job, float, dict]] = []
     if matched:
         resume = _resume_for(session, owner_hash)
-        prefs = _prefs_for(session, owner_hash)
         profile = build_profile(resume, prefs)
         if profile.is_empty():
             return []
@@ -445,7 +484,7 @@ def status_counts(
     if profile.is_empty():
         rows = []
     else:
-        rows = [j for j in rows if passes_threshold(*score_job(j, profile))]
+        rows = [j for j in rows if _matches_refinements(j, prefs) and passes_threshold(*score_job(j, profile))]
 
     states = _states_for(session, owner_hash, [j.id for j in rows if j.id is not None])
 
