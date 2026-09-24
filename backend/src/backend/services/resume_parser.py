@@ -112,12 +112,14 @@ def _parse_response(content: str) -> ParsedResume:
 
 def extract_fields(text: str) -> ParsedResume:
     settings = get_settings()
-    if not settings.openrouter_api_key:
-        raise ResumeParseError("OPENROUTER_API_KEY is not configured.")
+    if not settings.gemini_api_key:
+        raise ResumeParseError("GEMINI_API_KEY is not configured.")
 
     client = OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
+        api_key=settings.gemini_api_key,
+        base_url=settings.gemini_base_url,
+        timeout=30.0,
+        max_retries=1,
     )
 
     schema = json.dumps(ParsedResume.model_json_schema(), indent=2)
@@ -125,7 +127,7 @@ def extract_fields(text: str) -> ParsedResume:
 
     try:
         response = client.chat.completions.create(
-            model=settings.resume_parser_model,
+            model=settings.gemini_model,
             messages=[
                 {"role": "system", "content": system},
                 {
@@ -135,10 +137,10 @@ def extract_fields(text: str) -> ParsedResume:
             ],
             response_format={"type": "json_object"},
             temperature=0.0,
-            max_tokens=4096,
+            max_tokens=2048,
         )
     except Exception as e:
-        raise ResumeParseError(f"OpenRouter request failed: {e}") from e
+        raise ResumeParseError(f"Gemini request failed: {e}") from e
 
     content = (response.choices[0].message.content or "").strip()
     if not content:
@@ -166,12 +168,14 @@ Return ONLY a JSON object of the form {"roles": ["Role 1", "Role 2", ...]}. No p
 
 def suggest_target_roles(parsed: ParsedResume) -> list[str]:
     settings = get_settings()
-    if not settings.openrouter_api_key:
-        raise ResumeParseError("OPENROUTER_API_KEY is not configured.")
+    if not settings.gemini_api_key:
+        raise ResumeParseError("GEMINI_API_KEY is not configured.")
 
     client = OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
+        api_key=settings.gemini_api_key,
+        base_url=settings.gemini_base_url,
+        timeout=30.0,
+        max_retries=1,
     )
 
     exp_lines = []
@@ -192,7 +196,7 @@ def suggest_target_roles(parsed: ParsedResume) -> list[str]:
 
     try:
         response = client.chat.completions.create(
-            model=settings.resume_parser_model,
+            model=settings.gemini_model,
             messages=[
                 {"role": "system", "content": _SUGGEST_ROLES_SYSTEM},
                 {"role": "user", "content": f"Candidate profile:\n\n{profile}"},
@@ -202,7 +206,7 @@ def suggest_target_roles(parsed: ParsedResume) -> list[str]:
             max_tokens=512,
         )
     except Exception as e:
-        raise ResumeParseError(f"OpenRouter request failed: {e}") from e
+        raise ResumeParseError(f"Gemini request failed: {e}") from e
 
     content = (response.choices[0].message.content or "").strip()
     if not content:

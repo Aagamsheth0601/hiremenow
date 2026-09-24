@@ -20,3 +20,4 @@
 | Skipping priorities could keep an earlier saved refinement. | Skip only navigated to Discover Jobs. | Delete saved priorities before navigating; the API then falls back to resume-derived suggestions. |
 | The first sync of verified files stopped before copying. | The path safety check rejected files directly under the repository root. | Allowed the verified root directory itself and reran the named-file copy successfully. |
 | Discover Jobs reported zero companies and no error after a successful resume upload. | YC's old hardcoded Algolia search credential returned HTTP 403, and the scraper swallowed targeted query failures. | Read YC's public job pages instead; recognize IN/US region codes and show source errors in the UI. |
+| Resume analysis felt too slow for an interactive upload flow. | Parsing and outreach depended on a slower routed free model. | Call Gemini Flash-Lite directly through Google's OpenAI-compatible endpoint with bounded timeouts and retries. |

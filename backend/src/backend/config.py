@@ -19,9 +19,9 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
 
-    openrouter_api_key: str = ""
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    resume_parser_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     google_client_id: str = ""
     google_client_secret: str = ""

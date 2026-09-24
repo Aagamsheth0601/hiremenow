@@ -15,7 +15,7 @@ Upload a PDF résumé, review the extracted profile, and discover startup jobs r
 
 ## How it works
 
-1. Upload a résumé PDF. The API extracts text and asks OpenRouter to build a structured profile.
+1. Upload a résumé PDF. The API extracts text and asks Gemini Flash-Lite to build a structured profile.
 2. Review the suggested match focus or skip straight to Discover Jobs.
 3. Explore public startup openings ranked by role and skill overlap. Strong, medium, and low fit cards show the evidence behind each score.
 4. Refine matches by role, location, or work mode. Save promising jobs and track outreach status in the same browser.
@@ -23,11 +23,11 @@ Upload a PDF résumé, review the extracted profile, and discover startup jobs r
 
 ## Stack
 
-React, TypeScript, Vite, Tailwind CSS, FastAPI, SQLModel, PostgreSQL/SQLite, and OpenRouter.
+React, TypeScript, Vite, Tailwind CSS, FastAPI, SQLModel, PostgreSQL/SQLite, and Gemini.
 
 ## Run locally in VS Code Git Bash
 
-Open two terminals from the repo root. Add your OpenRouter key to a gitignored `backend/.env`; copy [`backend/.env.example`](backend/.env.example) as a starting point. The locked Vite 6 toolchain supports this machine's Node 20.11.1.
+Open two terminals from the repo root. Add your Gemini key to a gitignored `backend/.env`; copy [`backend/.env.example`](backend/.env.example) as a starting point. The locked Vite 6 toolchain supports this machine's Node 20.11.1.
 
 Backend:
 

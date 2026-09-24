@@ -46,11 +46,13 @@ Return only JSON with one string field named message."""
 
 def _client() -> OpenAI:
     settings = get_settings()
-    if not settings.openrouter_api_key:
-        raise OutreachError("OPENROUTER_API_KEY is not configured.")
+    if not settings.gemini_api_key:
+        raise OutreachError("GEMINI_API_KEY is not configured.")
     return OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
+        api_key=settings.gemini_api_key,
+        base_url=settings.gemini_base_url,
+        timeout=30.0,
+        max_retries=1,
     )
 
 
@@ -115,7 +117,7 @@ def _call_llm(system: str, user: str, *, max_tokens: int) -> dict:
     client = _client()
     try:
         response = client.chat.completions.create(
-            model=settings.resume_parser_model,
+            model=settings.gemini_model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -125,7 +127,7 @@ def _call_llm(system: str, user: str, *, max_tokens: int) -> dict:
             max_tokens=max_tokens,
         )
     except Exception as e:
-        raise OutreachError(f"OpenRouter request failed: {e}") from e
+        raise OutreachError(f"Gemini request failed: {e}") from e
 
     content = (response.choices[0].message.content or "").strip()
     if not content:
