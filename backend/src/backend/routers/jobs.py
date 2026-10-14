@@ -139,40 +139,31 @@ def _matches_refinements(job: Job, prefs: JobPreferences | None) -> bool:
 
 
 @router.post("/scrape")
-def trigger_scrape(
-    company_limit: int = Query(default=10, ge=1, le=200),
-    job_limit_per_company: int = Query(default=10, ge=1, le=50),
-    region: str | None = Query(default=None, pattern="^(us|india)$"),
+def trigger_scrape(owner_hash: str = Depends(get_visitor_hash)) -> dict:
+    raise HTTPException(410, "Job collection is managed automatically. Reload the job list to see available matches.")
+
+
+@router.get("/freshness")
+def collection_freshness(
+    region: str = Query(pattern="^(us|india)$"),
     session: Session = Depends(get_session),
     owner_hash: str = Depends(get_visitor_hash),
 ) -> dict:
-    search_terms: list[str] | None = None
-    resume = _resume_for(session, owner_hash)
-    prefs = _prefs_for(session, owner_hash)
-    profile = build_profile(resume, prefs)
-    if not profile.is_empty():
-        search_terms = search_terms_from_profile(profile)
-
-    match_profile = profile if not profile.is_empty() else None
-
-    stats = scrape_yc_jobs(
-        session,
-        company_limit=company_limit,
-        job_limit_per_company=job_limit_per_company,
-        region=region,
-        search_terms=search_terms,
-        match_profile=match_profile,
-    )
-    total = session.exec(select(func.count(Job.id))).one()
-    return {
-        "companies_visited": stats.companies_visited,
-        "jobs_seen": stats.jobs_seen,
-        "jobs_inserted": stats.jobs_inserted,
-        "jobs_updated": stats.jobs_updated,
-        "jobs_skipped": stats.jobs_skipped,
-        "errors": stats.errors,
-        "total_jobs_in_db": total,
-    }
+    from datetime import timedelta
+    from backend.models.collection import CollectionRun
+    latest = session.exec(select(CollectionRun).where(CollectionRun.region == region).order_by(CollectionRun.started_at.desc())).first()
+    successful = session.exec(select(CollectionRun).where(CollectionRun.region == region, CollectionRun.status == "completed").order_by(CollectionRun.finished_at.desc())).first()
+    def iso(value):
+        return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+    last_success = successful.finished_at if successful else None
+    state = latest.status if latest else "not_started"
+    if latest and state == "running" and datetime.now(timezone.utc) - latest.started_at.replace(tzinfo=timezone.utc) > timedelta(hours=2):
+        state = "interrupted"
+    return {"source": "Y Combinator", "region": region, "status": state,
+            "last_attempt_at": iso(latest.started_at) if latest else None,
+            "last_success_at": iso(last_success),
+            "stale": last_success is None or datetime.now(timezone.utc) - last_success.replace(tzinfo=timezone.utc) > timedelta(hours=13),
+            "jobs_saved": latest.jobs_saved if latest else 0}
 
 
 @router.get("/count")
@@ -412,7 +403,8 @@ def _serialize(
         "status_updated_at": state.status_updated_at.isoformat() if state and state.status_updated_at else None,
         "is_starred": bool(state.is_starred) if state else False,
         "source_url": j.source_url,
-        "scraped_at": j.scraped_at.isoformat(),
+        "scraped_at": j.scraped_at.replace(tzinfo=timezone.utc).isoformat(),
+        "last_checked_at": j.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
     if score is not None:
         out["match_score"] = round(score, 1)

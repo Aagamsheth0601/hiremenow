@@ -10,7 +10,6 @@ import {
   type Job,
   type LinkedInDraft,
   type Preferences,
-  type ScrapeResult,
   type StatusCounts,
   type StatusFilter,
   type UploadResponse,
@@ -89,9 +88,8 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
-  const [scraping, setScraping] = useState(false);
-  const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
-  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const [freshness, setFreshness] = useState<{status:string; last_success_at:string|null; stale:boolean}|null>(null);
+  const [freshnessError, setFreshnessError] = useState(false);
   const [region, setRegion] = useState<"india" | "us">("india");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -220,49 +218,16 @@ export default function JobsPage() {
   const totalPages = Math.max(1, Math.ceil(sortedJobs.length / JOBS_PER_PAGE));
   const pagedJobs = sortedJobs.slice(page * JOBS_PER_PAGE, (page + 1) * JOBS_PER_PAGE);
 
-  const lastScrapedLabel = useMemo(() => {
-    if (jobs.length === 0) return null;
-    const newest = jobs.reduce((acc, j) =>
-      new Date(j.scraped_at).getTime() > new Date(acc.scraped_at).getTime() ? j : acc,
-    );
-    return timeAgo(newest.scraped_at);
-  }, [jobs]);
-
-  const handleScrape = useCallback(async (automatic = false) => {
-    setScraping(true);
-    setScrapeMsg(null);
-    setScrapeError(null);
-    try {
-      const res = await apiFetch(
-        `${BACKEND_URL}/jobs/scrape?company_limit=${automatic ? 10 : 25}&job_limit_per_company=5&region=${region}`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data: ScrapeResult = await res.json();
-      if (data.errors > 0 && data.companies_visited === 0) {
-        throw new Error("The YC job source is unavailable right now. Please retry later.");
-      }
-      const regionLabel = region === "india" ? "India" : "US";
-      setScrapeMsg(
-        `Scraped ${data.companies_visited} ${regionLabel} companies — ${data.jobs_inserted} new, ${data.jobs_updated} updated (total ${data.total_jobs_in_db}).`,
-      );
-      await loadJobs(region, statusFilter);
-      loadCounts(region);
-    } catch (err) {
-      console.error("scrape failed", err);
-      setScrapeError(err instanceof Error ? err.message : "scrape failed");
-    } finally {
-      setScraping(false);
-    }
-  }, [region, statusFilter, loadJobs, loadCounts]);
-
   useEffect(() => {
-    if (prefsLoading || !hasResume || jobsLoading || jobsError || jobs.length > 0 || scraping || statusFilter !== "active") return;
-    const key = `hiremenow.jobsAutoSearch.${region}`;
-    if (sessionStorage.getItem(key)) return;
-    sessionStorage.setItem(key, "1");
-    void handleScrape(true);
-  }, [prefsLoading, hasResume, jobsLoading, jobsError, jobs.length, scraping, statusFilter, region, handleScrape]);
+    let cancelled = false;
+    setFreshness(null);
+    setFreshnessError(false);
+    apiFetch(`${BACKEND_URL}/jobs/freshness?region=${region}`)
+      .then(async response => { if (!response.ok) throw new Error("Unavailable"); return response.json(); })
+      .then(data => { if (!cancelled) setFreshness(data); })
+      .catch(() => { if (!cancelled) setFreshnessError(true); });
+    return () => { cancelled = true; };
+  }, [region]);
 
   if (prefsLoading) {
     return (
@@ -294,49 +259,34 @@ export default function JobsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-              Discover jobs
+              Discover YC startup jobs
             </h1>
             <p className="text-sm text-zinc-600">
-              {jobsLoading || (scraping && jobs.length === 0)
-                ? "Finding jobs that fit your resume…"
-                : `${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}${
-                    lastScrapedLabel ? ` · last scraped ${lastScrapedLabel}` : ""
-                  }`}
+              {jobsLoading ? "Loading your matches…" : `${jobs.length} matches in our collected YC listings`}
             </p>
             <p className="text-xs text-zinc-500">
-              Ranked by role fit and skills found in the job post. See why each opening matches your resume.
+              Public Y Combinator listings only. Ranked against your resume; this is not the entire job market.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <select
               value={region}
               onChange={(e) => setRegion(e.target.value as "india" | "us")}
-              disabled={scraping}
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-100"
             >
               <option value="india">India</option>
               <option value="us">US</option>
             </select>
-            <button
-              type="button"
-              onClick={() => void handleScrape()}
-              disabled={scraping}
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-            >
-              {scraping ? "Finding jobs…" : "Refresh jobs"}
-            </button>
+
           </div>
         </div>
-        {scrapeMsg && (
-          <p className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-            {scrapeMsg}
-          </p>
-        )}
-        {scrapeError && (
-          <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-            Scrape failed: {scrapeError}
-          </p>
-        )}
+        <p role="status" className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          {freshnessError ? "Source freshness is unavailable. Listings may be out of date." : !freshness ? "Checking source freshness…" :
+            <>YC catalogue: {freshness.last_success_at ? `last refreshed ${timeAgo(freshness.last_success_at)}` : "awaiting its first successful collection"}.
+            {freshness.status === "running" ? " Collection is running." : ["failed", "partial", "interrupted"].includes(freshness.status) ? " The latest collection was incomplete; older listings remain available." : ""}
+            {freshness.stale && freshness.last_success_at ? " Refresh is overdue." : ""}
+            {" "}Collection is scheduled every 12 hours; start times can vary. Verify availability on YC.</>}
+        </p>
       </header>
 
       <section className="rounded-2xl border border-[#dce8dc] bg-white p-4 shadow-sm sm:p-5">
@@ -419,7 +369,7 @@ export default function JobsPage() {
 
       {jobsError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Could not load jobs: {jobsError}</p>}
 
-      {jobsLoading || (scraping && jobs.length === 0) ? (
+      {jobsLoading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Finding jobs that fit your resume…
         </div>
@@ -437,7 +387,7 @@ export default function JobsPage() {
               ? "Choose All to see your other matches."
               : hasLocationOrMode
                 ? "Try a broader location or work mode in Refine my matches."
-                : "Try Refresh jobs to find fresh startup openings."}
+                : "Our YC catalogue updates automatically. Try broader match preferences or check back after the next collection."}
           </p>
           {hasLocationOrMode && (statusFilter === "active" || statusFilter === "all") && (
             <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#173e35] px-4 text-sm font-semibold text-white hover:bg-[#285846]">
@@ -844,7 +794,7 @@ function JobCard({
 
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <span className="text-xs text-zinc-400">
-            Job posted {timeAgo(job.scraped_at)}
+            First seen {timeAgo(job.scraped_at)} · Checked {timeAgo(job.last_checked_at ?? job.scraped_at)}
           </span>
           {meta && (
             <span

@@ -21,3 +21,10 @@
 | The first sync of verified files stopped before copying. | The path safety check rejected files directly under the repository root. | Allowed the verified root directory itself and reran the named-file copy successfully. |
 | Discover Jobs reported zero companies and no error after a successful resume upload. | YC's old hardcoded Algolia search credential returned HTTP 403, and the scraper swallowed targeted query failures. | Read YC's public job pages instead; recognize IN/US region codes and show source errors in the UI. |
 | Resume analysis felt too slow for an interactive upload flow. | Parsing and outreach depended on a slower routed free model. | Call Gemini Flash-Lite directly through Google's OpenAI-compatible endpoint with bounded timeouts and retries. |
+
+### Scheduled collection and misleading freshness
+- Symptom: refresh updated jobs but the page still said last scraped weeks ago, and job cards called the same date a posting date.
+- Root cause: scraped_at was an immutable first-seen timestamp; the UI ignored updated_at. Collection was driven by visitors and filtered shared storage by their profiles.
+- Fix: expose last_checked_at, label first-seen dates honestly, persist region-level collection runs, and collect an unpersonalized catalogue on a 12-hour GitHub Actions schedule. Failed/partial runs preserve last successful refresh. The source is explicitly YC only.
+- Regression coverage also found listing refreshes overwrote enriched contacts with empty values; preserve existing enrichment when a refresh has no replacement.
+- The workflow needs COLLECTOR_DATABASE_URL in GitHub Actions secrets. It refuses to fall back to local SQLite if that secret is absent.

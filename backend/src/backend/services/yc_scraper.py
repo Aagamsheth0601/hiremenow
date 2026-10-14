@@ -375,10 +375,10 @@ def _public_job_listings(client: httpx.Client, *, region: str | None, search_ter
         company_link = link.parent.select_one(f'a[href="/companies/{slug}"]')
         company_text = company_link.get_text(" ", strip=True) if company_link else slug.replace("-", " ")
         name = re.split(r"\s+\([SW]\d+\)", company_text, maxsplit=1)[0].strip()
-        one_liner = company_text.split("•", 1)[-1].strip() if "•" in company_text else ""
+        one_liner = company_text.split("â€¢", 1)[-1].strip() if "â€¢" in company_text else ""
         meta = link.find_next_sibling("div")
         meta_text = meta.get_text(" ", strip=True) if meta else ""
-        location = meta_text.rsplit("•", 1)[-1].strip() if meta_text else ""
+        location = meta_text.rsplit("â€¢", 1)[-1].strip() if meta_text else ""
         location_lc = location.lower()
         if region == "india" and not re.search(r"\bindia\b|\bin\b|bengaluru|bangalore|mumbai|hyderabad|delhi|pune|gurugram|chennai", location_lc):
             continue
@@ -483,6 +483,10 @@ def _upsert_job(
         stats.jobs_inserted += 1
     else:
         for k, v in fields.items():
+            # Public listing refreshes do not contain enriched contact details.
+            # Preserve them rather than overwriting with empty placeholders.
+            if k in {"founders", "contact_emails", "company_website"} and not v:
+                continue
             setattr(existing, k, v)
         stats.jobs_updated += 1
 

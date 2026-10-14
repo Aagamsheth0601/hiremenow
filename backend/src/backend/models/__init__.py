@@ -1,3 +1,4 @@
+from backend.models.collection import CollectionRun
 from backend.models.draft import Draft
 from backend.models.job import Job
 from backend.models.preferences import JobPreferences

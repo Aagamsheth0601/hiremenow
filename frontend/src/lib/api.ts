@@ -111,6 +111,7 @@ export type Job = {
   draft_kinds: string[];
   source_url: string;
   scraped_at: string;
+  last_checked_at?: string;
   match_score?: number;
   match_details?: {
     matched_skills: string[];
