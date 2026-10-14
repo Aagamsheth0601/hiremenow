@@ -94,6 +94,7 @@ export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(0);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
 
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
@@ -229,6 +230,8 @@ export default function JobsPage() {
     return () => { cancelled = true; };
   }, [region]);
 
+  const selectedJob = pagedJobs.find(job => job.id === selectedId) ?? pagedJobs[0];
+
   if (prefsLoading) {
     return (
       <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
@@ -254,7 +257,7 @@ export default function JobsPage() {
   const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="discovery-workspace flex flex-col gap-6">
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-1">
@@ -397,16 +400,25 @@ export default function JobsPage() {
         </div>
       ) : (
         <>
-          <ul className="grid gap-4 lg:grid-cols-2">
-            {pagedJobs.map((job) => (
-              <JobCard
-                key={job.id}
-                job={job}
-                onStatusChange={handleStatusChange}
-                onStarChange={handleStarChange}
-              />
-            ))}
-          </ul>
+          <div className="job-workbench">
+            <section className="job-results" aria-label="Matching YC jobs">
+              <div className="results-label">YOUR SHORTLIST STARTS HERE <span>{pagedJobs.length} results</span></div>
+              {pagedJobs.map(job => (
+                <button key={job.id} className={`job-row ${selectedJob?.id === job.id ? "is-selected" : ""}`}
+                  aria-pressed={selectedJob?.id === job.id}
+                  onClick={() => { setSelectedId(job.id); if (window.innerWidth < 768) document.getElementById("job-detail")?.scrollIntoView({behavior:"smooth",block:"start"}); }}>
+                  <span className="row-company">{job.company_name}<span>{job.is_starred ? "★ Saved" : "YC"}</span></span>
+                  <strong>{job.title}</strong>
+                  <span className="row-location">{job.locations.join(" · ") || "Location not specified"}</span>
+                  <span className="row-bottom"><span>{job.match_score ?? "—"}/10 match</span><span>View role →</span></span>
+                </button>
+              ))}
+            </section>
+            <section id="job-detail" className="job-detail" aria-label="Selected job details">
+              <div className="detail-label">THE ROLE, THE FIT, YOUR NEXT STEP</div>
+              <ul>{selectedJob && <JobCard key={selectedJob.id} job={selectedJob} onStatusChange={handleStatusChange} onStarChange={handleStarChange}/>}</ul>
+            </section>
+          </div>
 
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -649,15 +661,15 @@ function JobCard({
   }[fitLevel];
 
   return (
-    <li className={`group rounded-[2rem] p-3 shadow-[0_22px_50px_-38px_#173e35] transition hover:-translate-y-0.5 hover:shadow-[0_26px_55px_-36px_#173e35] sm:p-5 ${fitStyle.background}`}>
-      <div className="rounded-[1.5rem] bg-white p-4 shadow-sm sm:p-6">
+    <li className="selected-job-card">
+      <div className="bg-white p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-[#e2eee5] pb-4">
-          <span className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Your match preview</span>
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Match evidence</span>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${fitStyle.badge}`}>
             {fitStyle.label}{job.match_score !== undefined ? ` · ${job.match_score}/10` : ""}
           </span>
         </div>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <div className="flex flex-col gap-5">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -792,7 +804,7 @@ function JobCard({
           )}
         </div>
 
-        <div className="flex flex-col items-start gap-2 sm:items-end">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
           <span className="text-xs text-zinc-400">
             First seen {timeAgo(job.scraped_at)} · Checked {timeAgo(job.last_checked_at ?? job.scraped_at)}
           </span>

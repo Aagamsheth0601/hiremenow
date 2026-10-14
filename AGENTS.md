@@ -28,3 +28,8 @@
 - Fix: expose last_checked_at, label first-seen dates honestly, persist region-level collection runs, and collect an unpersonalized catalogue on a 12-hour GitHub Actions schedule. Failed/partial runs preserve last successful refresh. The source is explicitly YC only.
 - Regression coverage also found listing refreshes overwrote enriched contacts with empty values; preserve existing enrichment when a refresh has no replacement.
 - The workflow needs COLLECTOR_DATABASE_URL in GitHub Actions secrets. It refuses to fall back to local SQLite if that secret is absent.
+
+### Verification — automated catalogue and discovery workspace
+- Production workflow 38650634432 completed successfully: India 7 companies / 15 listings saved; US 33 companies / 33 listings saved; zero errors. Live API freshness confirmed both regions completed and not stale.
+- Backend regression suite: 12 passed. Frontend TypeScript/Vite production build passed.
+- List selection and overflow checked with synthetic browser fixtures at 390, 768, and 1280px. No Refresh jobs button; selected role changes in the detail panel. Existing outreach actions were retained, not live-sent or regenerated during this UI check.

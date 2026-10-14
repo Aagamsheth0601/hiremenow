@@ -7,9 +7,9 @@ import SetupPage from "./pages/SetupPage";
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen w-full bg-[#f7f8f4] text-[#18342f]">
+      <div className="min-h-screen w-full bg-[#f3f5f9] text-[#202c42]">
         <Navbar />
-        <main className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 sm:pt-14">
+        <main className="mx-auto w-full max-w-7xl px-5 pb-20 pt-10 sm:px-8 sm:pt-14">
           <Routes>
             <Route path="/" element={<SetupPage />} />
             <Route path="/jobs" element={<JobsPage />} />
