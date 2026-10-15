@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { COUNTRIES, locationRegion } from "../lib/location";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import MatchFocusForm from "../components/MatchFocusForm";
 
@@ -90,6 +91,8 @@ export default function JobsPage() {
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<{status:string; last_success_at:string|null; stale:boolean}|null>(null);
   const [freshnessError, setFreshnessError] = useState(false);
+  const [countrySaving, setCountrySaving] = useState(false);
+  const [countryError, setCountryError] = useState<string | null>(null);
   const [region, setRegion] = useState<"india" | "us">("india");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -97,13 +100,18 @@ export default function JobsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
 
+  const jobsRequest = useRef(0);
+  const countsRequest = useRef(0);
+
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
+    const requestId = ++countsRequest.current;
     try {
       const res = await apiFetch(
         `${BACKEND_URL}/jobs/status-counts?region=${regionParam}`,
       );
       if (!res.ok) return;
-      setCounts((await res.json()) as StatusCounts);
+      const data = await res.json() as StatusCounts;
+      if (requestId === countsRequest.current) setCounts(data);
     } catch (err) {
       console.error("failed to load status counts", err);
     }
@@ -111,6 +119,7 @@ export default function JobsPage() {
 
   const loadJobs = useCallback(
     async (regionParam: "india" | "us", statusParam: StatusFilter) => {
+      const requestId = ++jobsRequest.current;
       setJobsLoading(true);
       setJobsError(null);
       try {
@@ -119,11 +128,11 @@ export default function JobsPage() {
         );
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data: Job[] = await res.json();
-        setJobs(data);
+        if (requestId === jobsRequest.current) setJobs(data);
       } catch (err) {
-        setJobsError(err instanceof Error ? err.message : "Could not load jobs.");
+        if (requestId === jobsRequest.current) setJobsError(err instanceof Error ? err.message : "Could not load jobs.");
       } finally {
-        setJobsLoading(false);
+        if (requestId === jobsRequest.current) setJobsLoading(false);
       }
     },
     [],
@@ -181,10 +190,9 @@ export default function JobsPage() {
         if (cancelled) return;
         setPrefs(data);
         setHasResume(resumes.length > 0);
-        const location = (resumes[0]?.parsed.contact.location ?? "").toLowerCase();
-        if (/united states|\busa\b|\bu\.s\.\b|new york|san francisco|seattle|boston|austin/.test(location)) {
-          setRegion("us");
-        }
+        const preferredRegion = locationRegion(data.locations[0] ?? "");
+        const homeRegion = locationRegion(resumes[0]?.parsed.contact.location ?? "");
+        setRegion(preferredRegion ?? homeRegion ?? "india");
       })
       .catch((error) => {
         if (!cancelled) setProfileError(error instanceof Error ? error.message : "Could not load your profile.");
@@ -198,13 +206,14 @@ export default function JobsPage() {
   }, []);
 
   useEffect(() => {
+    if (prefsLoading || !hasResume) return;
     setPage(0);
     loadJobs(region, statusFilter);
-  }, [loadJobs, region, statusFilter]);
+  }, [loadJobs, region, statusFilter, prefsLoading, hasResume]);
 
   useEffect(() => {
-    loadCounts(region);
-  }, [loadCounts, region]);
+    if (!prefsLoading && hasResume) loadCounts(region);
+  }, [loadCounts, region, prefsLoading, hasResume]);
 
   const JOBS_PER_PAGE = 30;
 
@@ -265,12 +274,29 @@ export default function JobsPage() {
           </div>
           <div className="flex items-center gap-2">
             <select
+              aria-label="Filter by country"
+              disabled={countrySaving || prefsLoading}
               value={region}
-              onChange={(e) => setRegion(e.target.value as "india" | "us")}
+              onChange={async (event) => {
+                const nextRegion = event.target.value as "india" | "us";
+                if (!prefs) return;
+                setCountrySaving(true);
+                setCountryError(null);
+                try {
+                  const response = await apiFetch(`${BACKEND_URL}/preferences`, {
+                    method: "PUT", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...prefs, locations: [COUNTRIES.find(country => country.region === nextRegion)!.name] }),
+                  });
+                  if (!response.ok) throw new Error("Could not save your country. Please try again.");
+                  setPrefs(await response.json() as Preferences);
+                  setRegion(nextRegion);
+                } catch (error) {
+                  setCountryError(error instanceof Error ? error.message : "Could not change country.");
+                } finally { setCountrySaving(false); }
+              }}
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-100"
             >
-              <option value="india">India</option>
-              <option value="us">US</option>
+              {COUNTRIES.map(country => <option key={country.region} value={country.region}>{country.name}</option>)}
             </select>
 
           </div>
@@ -284,11 +310,11 @@ export default function JobsPage() {
         </p>
       </header>
 
-      <section className="rounded-2xl border border-[#dce8dc] bg-white p-4 shadow-sm sm:p-5">
+      <section className="rounded-2xl border border-[#dce2ec] bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-sm font-bold text-[#173e35]">Matches shaped by your resume</h2>
-            <p className="mt-1 text-xs leading-5 text-[#688075]">
+            <h2 className="text-sm font-bold text-[#172b4d]">Matches shaped by your resume</h2>
+            <p className="mt-1 text-xs leading-5 text-[#596980]">
               {prefs?.has_saved ? "Your refinements are applied. You can change them anytime." : "We used the roles and skills found in your resume. Fine-tuning is optional."}
             </p>
           </div>
@@ -297,13 +323,13 @@ export default function JobsPage() {
             aria-expanded={refineOpen}
             aria-controls="refine-matches"
             onClick={() => setRefineOpen((open) => !open)}
-            className="min-h-10 shrink-0 rounded-xl border border-[#c7dec8] bg-[#f2f8f0] px-4 py-2 text-sm font-semibold text-[#285846] hover:bg-[#e6f2e5]"
+            className="min-h-10 shrink-0 rounded-xl border border-[#ccd5e3] bg-[#f1f5ff] px-4 py-2 text-sm font-semibold text-[#274fc5] hover:bg-[#e8edff]"
           >
             {refineOpen ? "Close refinements" : "Refine my matches"}
           </button>
         </div>
         {refineOpen && prefs && (
-          <div id="refine-matches" className="mt-5 border-t border-[#e5eee5] pt-5">
+          <div id="refine-matches" className="mt-5 border-t border-[#e1e7ef] pt-5">
             <MatchFocusForm
               initial={prefs}
               submitLabel="Apply refinements"
@@ -311,14 +337,19 @@ export default function JobsPage() {
                 setPrefs(updated);
                 setRefineOpen(false);
                 setPage(0);
-                await loadJobs(region, statusFilter);
-                await loadCounts(region);
+                const nextRegion = locationRegion(updated.locations[0] ?? "") ?? region;
+                setRegion(nextRegion);
+                if (nextRegion === region) {
+                  await loadJobs(nextRegion, statusFilter);
+                  await loadCounts(nextRegion);
+                }
               }}
             />
           </div>
         )}
       </section>
 
+      {countryError && <p role="alert" className="text-sm text-red-700">{countryError}</p>}
       <p className="text-xs text-zinc-500">
         Drafts are AI-generated and never sent automatically — copy & review
         before pasting into your email or LinkedIn.
@@ -369,15 +400,15 @@ export default function JobsPage() {
           Finding jobs that fit your resume…
         </div>
       ) : pagedJobs.length === 0 && !jobsError ? (
-        <div className="rounded-[1.5rem] border border-dashed border-[#c7dec8] bg-white p-10 text-center">
-          <p className="text-sm font-semibold text-[#173e35]">
+        <div className="rounded-xl border border-dashed border-[#ccd5e3] bg-white p-10 text-center">
+          <p className="text-sm font-semibold text-[#172b4d]">
             {statusFilter !== "active" && statusFilter !== "all"
               ? "No jobs in this list yet."
               : hasLocationOrMode
                 ? "No jobs match your current focus."
                 : "No matching jobs found yet."}
           </p>
-          <p className="mt-2 text-xs text-[#688075]">
+          <p className="mt-2 text-xs text-[#596980]">
             {statusFilter !== "active" && statusFilter !== "all"
               ? "Choose All to see your other matches."
               : hasLocationOrMode
@@ -385,7 +416,7 @@ export default function JobsPage() {
                 : "Our YC catalogue updates automatically. Try broader match preferences or check back after the next collection."}
           </p>
           {hasLocationOrMode && (statusFilter === "active" || statusFilter === "all") && (
-            <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#173e35] px-4 text-sm font-semibold text-white hover:bg-[#285846]">
+            <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#172b4d] px-4 text-sm font-semibold text-white hover:bg-[#274fc5]">
               Refine my matches
             </button>
           )}
@@ -722,7 +753,7 @@ function JobCard({
                 )) : <span className="text-xs text-[#6d8074]">No exact skill overlap found in the extracted text.</span>}
               </div>
               <details className="mt-3 text-sm">
-                <summary className="cursor-pointer text-xs font-semibold text-[#285846] underline-offset-2 hover:underline">See match details</summary>
+                <summary className="cursor-pointer text-xs font-semibold text-[#274fc5] underline-offset-2 hover:underline">See match details</summary>
               <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-700">
                 {job.match_details.matched_target_roles.length > 0 && (
                   <p>Role match: {job.match_details.matched_target_roles.join(", ")}</p>

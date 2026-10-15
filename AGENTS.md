@@ -38,3 +38,13 @@
 - Symptom: resume home location was prefilled as a desired work location, and profile setup looked mandatory.
 - Fix: leave unsaved location/work-mode preferences empty; show role chips, detected skills, collapsed optional filters, and a bold Skip preferences action. Return visitors can go directly to matches. Visitors without a resume redirect from /jobs to upload.
 - Verified TypeScript/Vite build, existing 12 backend tests plus a home-location regression, and browser save/skip/redirect at 390/768/1280 using synthetic API fixtures. Skip sends DELETE; role selection and additions save without implicit location filters.
+
+### Country refinements and region selection
+- Symptom: USA/US preferences opened India jobs or kept the old region after saving.
+- Root cause: resume home address overrode saved search location; frontend did not update region after refinement; backend used literal substring matching for country aliases.
+- Fix: saved location takes precedence, saving updates the region, normalize US/USA/U.S./United States and India/IN aliases, and ignore stale job/count responses. Country filters also respect restrictions on remote listings. Use one select-only country list for profile and discovery; changing the discovery country persists the preference, preventing conflicting filters. Coverage is explicitly India and United States.
+- Verified backend regressions, production frontend build, and synthetic browser save/reload/change/clear flows at 390/768/1280px with no horizontal overflow.
+
+### Consistent profile and discovery design
+- Replaced the mixed green styling with shared navy/blue panels, clearer typography, a match-evidence illustration labeled Example, and a three-step profile flow. Preserved optional preferences and bold skip.
+- Verified both pages at 390/768/1280px, country persistence between both pages, frontend build and 46 backend tests. Broader country collection remains outside current India/US coverage.

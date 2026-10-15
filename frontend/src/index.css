@@ -9,11 +9,12 @@ html { scroll-behavior: smooth; }
 body { margin: 0; }
 
 .display-font {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: inherit;
+  font-weight: 750;
   letter-spacing: -0.055em;
 }
 
-::selection { background: #cce8cc; color: #173e35; }
+::selection { background: #dce5ff; color: #172b4d; }
 
 /* Job discovery: compact comparison beside an inspectable selected role. */
 .discovery-workspace {color:#202c42;}
@@ -34,3 +35,31 @@ body { margin: 0; }
 .selected-job-card{list-style:none;min-width:0;}.selected-job-card a,.selected-job-card pre{overflow-wrap:anywhere;}.selected-job-card a.text-base{font-size:23px;line-height:1.3;letter-spacing:-.5px;}
 @media(min-width:1024px){.job-results{max-height:850px;overflow-y:auto;}.job-detail{position:sticky;top:90px;}}
 @media(max-width:767px){.job-workbench{grid-template-columns:1fr;gap:18px;}.job-results{max-height:420px;overflow-y:auto;}.job-row{padding:16px;}.results-label{padding:16px;}.job-detail{position:static;}}
+
+/* Shared workspace identity: crisp panels, explicit hierarchy and visible focus. */
+:root{color:#172b4d;background:#f3f5f9;}
+button,a,select,summary,input{ -webkit-tap-highlight-color:transparent; }
+button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid #5475e9;outline-offset:3px;}
+.profile-hero{display:grid;grid-template-columns:1.15fr 1fr;gap:60px;align-items:center;padding:24px 0 16px;}
+.eyebrow{font-size:10px;font-weight:750;letter-spacing:1.8px;color:#3859cf;}
+.hero-copy h1{font-size:clamp(42px,5.5vw,72px);font-weight:780;line-height:1.04;letter-spacing:-3.6px;margin:24px 0;}
+.hero-copy h1 span{color:#3859cf;}
+.hero-description{font-size:16px;line-height:1.85;color:#596980;max-width:490px;}
+.hero-cta{display:inline-flex;gap:32px;align-items:center;padding:15px 22px;background:#264ac0;color:white;border-radius:8px;font-size:14px;font-weight:700;margin-top:26px;box-shadow:0 7px 18px #264ac022;}
+.hero-cta:hover{background:#1d3a9b;}.hero-caption{font-size:11px;color:#64748b;margin-top:16px;}
+.match-blueprint{background:white;border:1px solid #d6dfed;border-radius:12px;box-shadow:0 18px 50px -30px #172b4d66;overflow:hidden;}
+.blueprint-header{display:flex;justify-content:space-between;align-items:center;padding:17px 24px;background:#172b4d;color:#cedaf1;font-size:10px;font-weight:700;letter-spacing:1.5px;}
+.sample-badge{border:1px solid #5c6e8b;border-radius:4px;padding:4px 7px;color:#e6edff;font-size:9px;}
+.blueprint-role{display:flex;align-items:center;gap:14px;padding:26px 24px;border-bottom:1px solid #e5eaf2;}
+.company-mark{display:grid;place-items:center;background:#eaf0ff;border:1px solid #d2ddff;color:#3859cf;width:44px;height:44px;border-radius:9px;font-size:24px;flex-shrink:0;}
+.blueprint-role h2{font-size:19px;font-weight:750;letter-spacing:-.5px;}.blueprint-role p{font-size:12px;color:#64748b;margin-top:4px;}
+.evidence-line{display:flex;gap:17px;margin:0 24px;padding:18px 0;border-bottom:1px solid #e5eaf2;}
+.evidence-line>span{font:11px ui-monospace,monospace;color:#7183a0;padding-top:3px;}.evidence-line strong{font-size:12px;}.evidence-line p{font-size:12px;color:#64748b;margin-top:4px;}
+.evidence-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}.evidence-tags span{background:#eff3fb;border:1px solid #dfe6f2;border-radius:4px;padding:4px 8px;font-size:10px;color:#3859a0;}
+.blueprint-footer{display:flex;justify-content:space-between;padding:17px 24px;background:#f7f9fd;font-size:11px;color:#3859cf;font-weight:650;}
+.workflow-strip{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #dce2ec;background:#fff;border-radius:10px;}
+.workflow-strip>div{padding:20px 24px;border-right:1px solid #e1e7ef;}.workflow-strip>div:last-child{border:0;}.workflow-strip span{float:left;margin:2px 14px 20px 0;font:12px ui-monospace,monospace;color:#3859cf;}.workflow-strip strong{font-size:12px;}.workflow-strip p{font-size:11px;color:#64748b;margin-top:4px;}
+.discovery-workspace>header{border-bottom:1px solid #dce2ec;padding-bottom:24px;}
+.discovery-workspace>header h1{line-height:1.15;}.job-results,.job-detail{box-shadow:0 6px 20px -16px #172b4d66;}
+@media(max-width:900px){.profile-hero{gap:28px;}.hero-copy h1{letter-spacing:-2px;}.workflow-strip>div{padding:16px;}}
+@media(max-width:640px){.profile-hero{grid-template-columns:1fr;padding-top:0;gap:28px;}.hero-copy h1{font-size:44px;}.hero-description{font-size:14px;}.workflow-strip{grid-template-columns:1fr;}.workflow-strip>div{border-right:0;border-bottom:1px solid #e1e7ef;}.workflow-strip span{margin-bottom:10px;}.blueprint-role,.blueprint-header,.blueprint-footer{padding-left:18px;padding-right:18px;}.evidence-line{margin:0 18px;}}

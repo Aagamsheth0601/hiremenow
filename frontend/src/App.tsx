@@ -7,7 +7,7 @@ import SetupPage from "./pages/SetupPage";
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen w-full bg-[#f3f5f9] text-[#202c42]">
+      <div className="min-h-screen w-full bg-[#f3f5f9] text-[#172b4d]">
         <Navbar />
         <main className="mx-auto w-full max-w-7xl px-5 pb-20 pt-10 sm:px-8 sm:pt-14">
           <Routes>
@@ -15,8 +15,8 @@ export default function App() {
             <Route path="/jobs" element={<JobsPage />} />
           </Routes>
         </main>
-        <footer className="border-t border-[#dce5dc] px-5 py-6 text-center text-xs text-[#668078]">
-          hiremenow · A more thoughtful way to find your next role.
+        <footer className="border-t border-[#dce2ec] px-5 py-6 text-center text-xs text-[#64748b]">
+          hiremenow · YC startup jobs, matched to your experience.
         </footer>
       </div>
     </BrowserRouter>

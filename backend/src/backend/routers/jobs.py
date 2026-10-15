@@ -89,7 +89,7 @@ def _matches_region(locations: list[str], region: str, *, title: str = "") -> bo
         blob += " " + title.lower()
     raw = " ".join(locations or []) + " " + title
     is_india = any(t in blob for t in _INDIA_TERMS) or bool(re.search(r"\bIN\b", raw))
-    is_us = any(t in blob for t in _US_TERMS) or bool(re.search(r"\bUS\b", raw)) or bool(_US_STATE_RE.search(raw))
+    is_us = any(t in blob for t in _US_TERMS) or bool(re.search(r"\b(?:us|usa)\b", blob.replace(".", ""))) or bool(_US_STATE_RE.search(raw))
     is_remote = "remote" in blob
     if is_remote and not is_india and not is_us:
         return True
@@ -112,14 +112,17 @@ def _matches_refinements(job: Job, prefs: JobPreferences | None) -> bool:
     if prefs.locations:
         city_or_country = prefs.locations[0].split(",", 1)[0].strip().lower()
         if city_or_country:
-            aliases = {
-                "us": ("united states", "usa", " us "),
-                "in": ("india",),
-            }.get(city_or_country, (city_or_country,))
-            location_matches = any(alias in f" {where} " for alias in aliases)
+            normalized = city_or_country.replace(".", "")
+            if normalized in {"us", "usa", "united states", "united states of america"}:
+                location_matches = _matches_region(job.locations, "us")
+            elif normalized in {"in", "india", "bharat"}:
+                location_matches = _matches_region(job.locations, "india")
+            else:
+                location_matches = bool(re.search(r"(?<![a-z0-9])" + re.escape(city_or_country) + r"(?![a-z0-9])", where))
             # A remote job can still suit a city preference when the visitor
             # explicitly asked to see remote work.
-            remote_exception = "remote" in (prefs.work_modes or []) and "remote" in mode_text
+            country_preference = normalized in {"us", "usa", "united states", "united states of america", "in", "india", "bharat"}
+            remote_exception = not country_preference and "remote" in (prefs.work_modes or []) and "remote" in mode_text
             if not location_matches and not remote_exception:
                 return False
 

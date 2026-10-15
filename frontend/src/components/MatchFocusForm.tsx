@@ -1,3 +1,4 @@
+import { COUNTRIES, locationRegion } from "../lib/location";
 import { useEffect, useState } from "react";
 
 import { apiFetch, BACKEND_URL, type Preferences } from "../lib/api";
@@ -65,14 +66,17 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
         <summary className="cursor-pointer text-sm font-bold text-slate-800">Fine-tune my search (optional)</summary>
         <p className="my-3 text-xs text-slate-600">Where you want to work can differ from where you live. Leave these open for broader matches.</p>
         <div className="grid gap-4 sm:grid-cols-2">
-      <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#365f4b]">
-        Preferred city or country
-        <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Mumbai, India" className="min-h-11 rounded-xl border border-[#ccdccc] bg-white px-3 text-sm font-normal text-[#173e35] focus:border-[#59966e] focus:outline-none" />
-        <span className="font-normal text-[#7b9485]">Leave blank to see any location.</span>
+      <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#43536d]">
+        Country (optional)
+        <select aria-label="Preferred country" value={locationRegion(location) ?? ""} onChange={event => setLocation(COUNTRIES.find(country => country.region === event.target.value)?.name ?? "")} className="min-h-11 rounded-xl border border-[#ccd5e3] bg-white px-3 text-sm font-normal text-[#172b4d]">
+          <option value="">No country preference</option>
+          {COUNTRIES.map(country => <option key={country.region} value={country.region}>{country.name}</option>)}
+        </select>
+        <span className="font-normal text-[#64748b]">Currently collecting YC listings in India and the United States.</span>
       </label>
-      <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#365f4b]">
+      <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#43536d]">
         Work mode
-        <select value={workMode} onChange={(event) => setWorkMode(event.target.value)} className="min-h-11 rounded-xl border border-[#ccdccc] bg-white px-3 text-sm font-normal text-[#173e35] focus:border-[#59966e] focus:outline-none">
+        <select value={workMode} onChange={(event) => setWorkMode(event.target.value)} className="min-h-11 rounded-xl border border-[#ccd5e3] bg-white px-3 text-sm font-normal text-[#172b4d] focus:border-[#3859cf] focus:outline-none">
           <option value="">Any work mode</option>
           <option value="remote">Remote</option>
           <option value="hybrid">Hybrid</option>
@@ -83,10 +87,10 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
       </details>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={saving} className="min-h-11 rounded-xl bg-[#173e35] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#285846] disabled:opacity-50">
+        <button type="submit" disabled={saving} className="min-h-11 rounded-xl bg-[#172b4d] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#274fc5] disabled:opacity-50">
           {saving ? "Saving..." : submitLabel}
         </button>
-        <span className="text-xs text-[#7b9485]">Saved privately for this browser.</span>
+        <span className="text-xs text-[#64748b]">Saved privately for this browser.</span>
       </div>
     </form>
   );

@@ -7,23 +7,23 @@ const links = [
 
 export default function Navbar() {
   return (
-    <nav className="sticky top-0 z-10 border-b border-[#dce5dc] bg-[#f7f8f4]/95 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-5 py-4 sm:px-8">
-        <NavLink to="/" className="flex items-center gap-2 text-lg font-bold tracking-[-0.05em] text-[#18342f]">
-          <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-xl bg-[#173e35] text-lg text-[#d0e8c8]">✳</span>
-          <span>hireme<span className="text-[#59966e]">now</span></span>
+    <nav className="sticky top-0 z-10 border-b border-[#dce2ec] bg-[#ffffff]/95 backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-5 py-4 sm:px-8">
+        <NavLink to="/" className="flex items-center gap-2 text-lg font-bold tracking-[-0.05em] text-[#172b4d]">
+          <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-xl bg-[#172b4d] text-lg text-[#ffffff]">↗</span>
+          <span>hireme<span className="text-[#3859cf]">now</span></span>
         </NavLink>
-        <div className="flex items-center gap-1 rounded-full border border-[#dce5dc] bg-white p-1 shadow-sm">
+        <div className="flex items-center gap-1 rounded-lg border border-[#dce2ec] bg-white p-1 shadow-sm">
           {links.map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
               end={l.end}
               className={({ isActive }) =>
-                `rounded-full px-3 py-1.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
+                `rounded-lg px-3 py-1.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
                   isActive
-                    ? "bg-[#173e35] text-white shadow-sm"
-                    : "text-[#567268] hover:bg-[#edf4ed]"
+                    ? "bg-[#172b4d] text-white shadow-sm"
+                    : "text-[#596980] hover:bg-[#eef2ff]"
                 }`
               }
             >
