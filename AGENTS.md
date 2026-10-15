@@ -48,3 +48,4 @@
 ### Consistent profile and discovery design
 - Replaced the mixed green styling with shared navy/blue panels, clearer typography, a match-evidence illustration labeled Example, and a three-step profile flow. Preserved optional preferences and bold skip.
 - Verified both pages at 390/768/1280px, country persistence between both pages, frontend build and 46 backend tests. Broader country collection remains outside current India/US coverage.
+- Added 150–280ms panel entrances, hover and press feedback; verified reduced-motion disables animation and no overflow at 390/768/1280px.

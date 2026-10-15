@@ -63,3 +63,18 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible,
 .discovery-workspace>header h1{line-height:1.15;}.job-results,.job-detail{box-shadow:0 6px 20px -16px #172b4d66;}
 @media(max-width:900px){.profile-hero{gap:28px;}.hero-copy h1{letter-spacing:-2px;}.workflow-strip>div{padding:16px;}}
 @media(max-width:640px){.profile-hero{grid-template-columns:1fr;padding-top:0;gap:28px;}.hero-copy h1{font-size:44px;}.hero-description{font-size:14px;}.workflow-strip{grid-template-columns:1fr;}.workflow-strip>div{border-right:0;border-bottom:1px solid #e1e7ef;}.workflow-strip span{margin-bottom:10px;}.blueprint-role,.blueprint-header,.blueprint-footer{padding-left:18px;padding-right:18px;}.evidence-line{margin:0 18px;}}
+/* Short transitions provide feedback without slowing down the search. */
+@keyframes panel-enter {from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+@media(prefers-reduced-motion:no-preference){
+  .hero-copy,.match-blueprint,.workflow-strip,#get-started,.discovery-workspace>header,.job-results,.job-detail,#refine-matches{animation:panel-enter .28s ease-out both;}
+  .match-blueprint{animation-delay:.06s;}.workflow-strip{animation-delay:.1s;}
+  .hero-cta,.workflow-strip>div,.job-row,button,a,select{transition:background-color .15s ease,border-color .15s ease,box-shadow .15s ease,transform .15s ease;}
+  .hero-cta:hover{transform:translateY(-2px);box-shadow:0 10px 24px #264ac033;}
+  .hero-cta span{transition:transform .15s ease;}.hero-cta:hover span{transform:translate(2px,-2px);}
+  button:active:not(:disabled){transform:scale(.98);}
+  .job-row:hover{box-shadow:inset 3px 0 #a7b8ed;}
+  .workflow-strip>div:hover{background:#f7f9ff;}
+
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
