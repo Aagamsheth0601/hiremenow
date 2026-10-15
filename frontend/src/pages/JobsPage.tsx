@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import MatchFocusForm from "../components/MatchFocusForm";
 
 import {
@@ -244,15 +244,7 @@ export default function JobsPage() {
     return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">{profileError}</div>;
   }
 
-  if (!hasResume) {
-    return (
-      <div className="rounded-2xl border border-[#cce3d0] bg-white p-8 text-center">
-        <h1 className="display-font text-3xl text-[#173e35]">Start with your resume.</h1>
-        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#688075]">Upload a PDF to get matches based on your experience. You can refine them later.</p>
-        <Link to="/" className="mt-6 inline-flex min-h-11 items-center rounded-xl bg-[#173e35] px-5 py-2.5 text-sm font-semibold text-white">Upload my resume</Link>
-      </div>
-    );
-  }
+  if (!hasResume) return <Navigate to="/#get-started" replace />;
 
   const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 

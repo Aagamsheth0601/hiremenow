@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 
 import MatchFocusForm from "../components/MatchFocusForm";
 
@@ -17,6 +17,7 @@ export default function SetupPage() {
     "idle"
   );
   const [error, setError] = useState<string | null>(null);
+  const [savedResume, setSavedResume] = useState<UploadResponse | null>(null);
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [hasResume, setHasResume] = useState<boolean | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -57,11 +58,12 @@ export default function SetupPage() {
     ])
       .then(async ([resumesResponse, preferencesResponse]) => {
         if (!resumesResponse.ok || !preferencesResponse.ok) throw new Error("Could not load your private profile.");
-        return [await resumesResponse.json() as unknown[], await preferencesResponse.json() as Preferences] as const;
+        return [await resumesResponse.json() as UploadResponse[], await preferencesResponse.json() as Preferences] as const;
       })
       .then(([resumes, savedPreferences]) => {
         if (cancelled) return;
         setHasResume(resumes.length > 0);
+        setSavedResume(resumes[0] ?? null);
         setPreferences(savedPreferences);
       })
       .catch(() => {
@@ -83,7 +85,7 @@ export default function SetupPage() {
     return {
       target_roles: suggestedRoles,
       seniority: preferences?.seniority ?? null,
-      locations: result.parsed.contact.location ? [result.parsed.contact.location] : [],
+      locations: [],
       work_modes: [],
       company_sizes: [],
       needs_visa_sponsorship: false,
@@ -149,7 +151,8 @@ export default function SetupPage() {
   };
 
   return (
-    <div className="flex flex-col gap-12">
+    <div className="flex flex-col gap-8">
+      {hasResume && status !== "done" && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5"><div><strong>Your resume is ready.</strong><p className="mt-1 text-sm text-slate-600">Preferences are optional. You can go straight to your matches.</p></div><Link to="/jobs" className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-bold text-white">Back to matches →</Link></div>}
       <section className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full border border-[#cce3d0] bg-[#eaf4e9] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.16em] text-[#377454]">
@@ -255,15 +258,16 @@ export default function SetupPage() {
       )}
 
       {hasResume && focusInitial && (!file || status === "done") && (
-        <section ref={reviewRef} className="scroll-mt-24 rounded-[2rem] border border-[#cce3d0] bg-[#eaf4e9] p-6 shadow-[0_24px_55px_-40px_#173e35] sm:p-8">
-          <div className="mb-6 max-w-2xl">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#618270]">Your next step</p>
-            <h2 className="display-font mt-2 text-3xl text-[#173e35]">Review your priorities</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#537061]">These suggestions came from your resume. Adjust them or skip to recommendations.</p>
+        <section ref={reviewRef} className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 sm:p-8">
+          <div className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-widest text-indigo-700">Your match profile · optional preferences</p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Here’s what we picked up from your resume.</h2>
+            <p className="mt-2 text-sm text-slate-600">We use your skills and experience to rank YC jobs. Adjust the suggested roles, or skip this step.</p>
+            <div className="mt-4 flex flex-wrap gap-2" aria-label="Detected skills">{(result ?? savedResume)?.parsed.skills.slice(0,12).map(skill => <span key={skill} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{skill}</span>)}</div>
           </div>
-          <MatchFocusForm initial={focusInitial} submitLabel="Use these priorities — Discover Jobs" onSaved={() => navigate("/jobs")} />
-          <button type="button" onClick={skipPreferences} disabled={skipping} className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-[#173e35] underline-offset-4 hover:underline disabled:opacity-50">
-            {skipping ? "Opening jobs…" : "Skip preferences — Discover Jobs"}
+          <MatchFocusForm initial={focusInitial} submitLabel="Show my matches" onSaved={() => navigate("/jobs")} />
+          <button type="button" onClick={skipPreferences} disabled={skipping} className="mt-5 inline-flex min-h-12 items-center rounded-lg border-2 border-slate-800 px-5 py-3 text-sm font-extrabold text-slate-900 hover:bg-slate-100 disabled:opacity-50">
+            {skipping ? "Opening jobs…" : "Skip preferences — Show my matches"}
           </button>
         </section>
       )}

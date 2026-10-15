@@ -33,3 +33,8 @@
 - Production workflow 38650634432 completed successfully: India 7 companies / 15 listings saved; US 33 companies / 33 listings saved; zero errors. Live API freshness confirmed both regions completed and not stale.
 - Backend regression suite: 12 passed. Frontend TypeScript/Vite production build passed.
 - List selection and overflow checked with synthetic browser fixtures at 390, 768, and 1280px. No Refresh jobs button; selected role changes in the detail panel. Existing outreach actions were retained, not live-sent or regenerated during this UI check.
+
+### Optional profile preferences
+- Symptom: resume home location was prefilled as a desired work location, and profile setup looked mandatory.
+- Fix: leave unsaved location/work-mode preferences empty; show role chips, detected skills, collapsed optional filters, and a bold Skip preferences action. Return visitors can go directly to matches. Visitors without a resume redirect from /jobs to upload.
+- Verified TypeScript/Vite build, existing 12 backend tests plus a home-location regression, and browser save/skip/redirect at 390/768/1280 using synthetic API fixtures. Skip sends DELETE; role selection and additions save without implicit location filters.

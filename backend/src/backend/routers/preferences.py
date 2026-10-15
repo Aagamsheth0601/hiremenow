@@ -58,7 +58,6 @@ def _prefill_from_resume(session: Session, owner_hash: str) -> PreferencesPayloa
         return PreferencesPayload()
 
     parsed = resume.parsed
-    contact = parsed.get("contact") or {}
     experience = parsed.get("experience") or []
 
     suggested = parsed.get("suggested_target_roles") or []
@@ -74,8 +73,8 @@ def _prefill_from_resume(session: Session, owner_hash: str) -> PreferencesPayloa
                 target_roles.append(title)
     target_roles = target_roles[:7]
 
-    location = (contact.get("location") or "").strip()
-    locations = [location] if location else []
+    # Home location is not an explicit job-search preference.
+    locations: list[str] = []
 
     return PreferencesPayload(
         target_roles=target_roles,

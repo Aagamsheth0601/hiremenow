@@ -59,3 +59,15 @@ def test_replacement_resume_resets_private_profile_and_skip_uses_resume(monkeypa
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
+
+def test_resume_home_location_is_not_a_search_restriction():
+    from backend.routers.preferences import _prefill_from_resume
+    engine = create_engine('sqlite://')
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(Resume(owner_hash='profile-test', filename='sample.pdf', raw_text='Sample', parsed={'contact': {'location': 'Mumbai, India'}, 'skills': ['Python'], 'suggested_target_roles': ['Backend Engineer']}))
+        session.commit()
+        suggestions = _prefill_from_resume(session, 'profile-test')
+        assert suggestions.locations == []
+        assert suggestions.work_modes == []
+        assert suggestions.target_roles == ['Backend Engineer']

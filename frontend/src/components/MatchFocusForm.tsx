@@ -9,14 +9,17 @@ type Props = {
 };
 
 export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props) {
-  const [roles, setRoles] = useState(initial.target_roles.join(", "));
+  const [roles, setRoles] = useState(initial.target_roles);
+  const [newRole, setNewRole] = useState("");
+  const [roleOptions, setRoleOptions] = useState(initial.target_roles);
   const [location, setLocation] = useState(initial.locations[0] ?? "");
   const [workMode, setWorkMode] = useState(initial.work_modes[0] ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setRoles(initial.target_roles.join(", "));
+    setRoles(initial.target_roles);
+    setRoleOptions(initial.target_roles);
     setLocation(initial.locations[0] ?? "");
     setWorkMode(initial.work_modes[0] ?? "");
   }, [initial]);
@@ -30,7 +33,7 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          target_roles: roles.split(",").map((role) => role.trim()).filter(Boolean),
+          target_roles: [...new Set([...roles, ...newRole.split(",").map(role => role.trim()).filter(Boolean)])],
           locations: location.trim() ? [location.trim()] : [],
           work_modes: workMode ? [workMode] : [],
           seniority: initial.seniority,
@@ -51,12 +54,17 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
   };
 
   return (
-    <form onSubmit={save} className="grid gap-4 md:grid-cols-3">
-      <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#365f4b]">
-        Target roles
-        <input value={roles} onChange={(event) => setRoles(event.target.value)} placeholder="Backend Engineer, Data Analyst" className="min-h-11 rounded-xl border border-[#ccdccc] bg-white px-3 text-sm font-normal text-[#173e35] focus:border-[#59966e] focus:outline-none" />
-        <span className="font-normal text-[#7b9485]">Separate multiple roles with commas.</span>
-      </label>
+    <form onSubmit={save} className="grid gap-4">
+      <fieldset disabled={saving} className="min-w-0">
+        <legend className="mb-3 text-sm font-semibold text-slate-800">Suggested target roles</legend>
+        <div className="flex flex-wrap gap-2">{roleOptions.map(role => <button key={role} type="button" aria-pressed={roles.includes(role)} onClick={() => setRoles(current => current.includes(role) ? current.filter(item => item !== role) : [...current,role])} className={`max-w-full rounded-full border px-3 py-2 text-left text-sm ${roles.includes(role) ? "border-indigo-600 bg-indigo-50 font-semibold text-indigo-800" : "border-slate-300 text-slate-600"}`}>{roles.includes(role) ? "✓ " : "+ "}{role}</button>)}</div>
+        <label className="mt-4 flex max-w-md flex-col gap-2 text-xs font-semibold text-slate-600">Add a role (optional)<input value={newRole} onChange={event => setNewRole(event.target.value)} placeholder="e.g. Platform Engineer" className="min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-normal" /></label>
+        <p className="mt-2 text-xs text-slate-500">No roles selected? We’ll use your resume’s suggested roles.</p>
+      </fieldset>
+      <details className="rounded-lg border border-slate-200 p-4">
+        <summary className="cursor-pointer text-sm font-bold text-slate-800">Fine-tune my search (optional)</summary>
+        <p className="my-3 text-xs text-slate-600">Where you want to work can differ from where you live. Leave these open for broader matches.</p>
+        <div className="grid gap-4 sm:grid-cols-2">
       <label className="flex flex-col gap-1.5 text-xs font-semibold text-[#365f4b]">
         Preferred city or country
         <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Mumbai, India" className="min-h-11 rounded-xl border border-[#ccdccc] bg-white px-3 text-sm font-normal text-[#173e35] focus:border-[#59966e] focus:outline-none" />
@@ -71,8 +79,10 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
           <option value="on-site">On-site</option>
         </select>
       </label>
-      {error && <p role="alert" className="text-sm text-red-700 md:col-span-3">{error}</p>}
-      <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+        </div>
+      </details>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={saving} className="min-h-11 rounded-xl bg-[#173e35] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#285846] disabled:opacity-50">
           {saving ? "Saving..." : submitLabel}
         </button>
