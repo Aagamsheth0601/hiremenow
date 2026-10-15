@@ -7,7 +7,8 @@ import SetupPage from "./pages/SetupPage";
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen w-full bg-[#f3f5f9] text-[#172b4d]">
+      <div className="app-shell min-h-screen w-full bg-[#f3f5f9] text-[#172b4d]">
+        <div className="ambient-background" aria-hidden="true"><span /><span /><span /></div>
         <Navbar />
         <main className="mx-auto w-full max-w-7xl px-5 pb-20 pt-10 sm:px-8 sm:pt-14">
           <Routes>

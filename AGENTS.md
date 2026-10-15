@@ -49,3 +49,8 @@
 - Replaced the mixed green styling with shared navy/blue panels, clearer typography, a match-evidence illustration labeled Example, and a three-step profile flow. Preserved optional preferences and bold skip.
 - Verified both pages at 390/768/1280px, country persistence between both pages, frontend build and 46 backend tests. Broader country collection remains outside current India/US coverage.
 - Added 150–280ms panel entrances, hover and press feedback; verified reduced-motion disables animation and no overflow at 390/768/1280px.
+
+### Distinct gradient identity
+- Added plum/coral/violet surfaces and three slow CSS background gradients; light content panels preserve reading contrast. No libraries added.
+- Fixed an active-link selector that also styled the logo; restricted it to navigation tabs.
+- Verified profile and discovery at 390/768/1280px, reduced-motion disables ambient animation, and production build passes.
