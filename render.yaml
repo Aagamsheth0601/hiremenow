@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install .
+    buildCommand: pip install . -c constraints.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     envVars:
