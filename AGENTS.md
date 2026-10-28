@@ -54,3 +54,9 @@
 - Added plum/coral/violet surfaces and three slow CSS background gradients; light content panels preserve reading contrast. No libraries added.
 - Fixed an active-link selector that also styled the logo; restricted it to navigation tabs.
 - Verified profile and discovery at 390/768/1280px, reduced-motion disables ambient animation, and production build passes.
+
+## Security/deployment maintenance October 28 2026
+- Added basic response hardening: framing denied, objects disabled, base URI restricted; MIME sniffing and referrer policy set.
+- Bug: dependency audits identified vulnerable build tooling. Root cause: older Vite/esbuild or source-map-js lock entries. Fix: Vite 6.4.4 and patched lock dependencies; production build and npm audit pass on Node 20.11.1.
+- Bugs: arbitrary Authorization headers bypassed session-creation limits; reparse had no budget; inactive limiter buckets accumulated. Fix: session creation uses client address, reparse shares upload budget, idle buckets expire and bucket count is capped. Four regression tests pass. Limits remain per-process and are not distributed abuse protection.
+- npm warns that the pre-existing eslint-visitor-keys 5 dependency needs Node 20.19+. The production TypeScript/Vite build passes on 20.11.1; lint-tool compatibility is separate.

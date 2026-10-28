@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 
 _calls: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _lock = threading.Lock()
+_last_cleanup = 0.0
+_MAX_BUCKETS = 10000
 
 
 def _policy(path: str, method: str) -> tuple[str, int, int] | None:
@@ -21,7 +23,7 @@ def _policy(path: str, method: str) -> tuple[str, int, int] | None:
         return None
     if path == "/sessions":
         return "sessions", 100, 3600
-    if path == "/resumes":
+    if path in ("/resumes", "/resumes/latest/reparse"):
         return "resumes", 5, 3600
     if path == "/jobs/scrape":
         return "scrape", 3, 3600
@@ -33,16 +35,27 @@ def _policy(path: str, method: str) -> tuple[str, int, int] | None:
 
 
 async def guard_expensive_actions(request: Request, call_next):
+    global _last_cleanup
     policy = _policy(request.url.path, request.method)
     if policy is None:
         return await call_next(request)
     action, limit, window = policy
-    identity = (request.headers.get("authorization") or "").strip()
+    # Session creation has no authenticated token: arbitrary headers must not
+    # create fresh rate-limit identities.
+    identity = "" if action == "sessions" else (request.headers.get("authorization") or "").strip()
     if not identity:
         identity = request.client.host if request.client else "unknown"
     key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     now = time.monotonic()
     with _lock:
+        # Expire idle identities and bound memory even under random-token abuse.
+        if now - _last_cleanup >= 60:
+            for bucket in list(_calls):
+                if not _calls[bucket] or _calls[bucket][-1] < now - 3600:
+                    del _calls[bucket]
+            _last_cleanup = now
+        if (action, key) not in _calls and len(_calls) >= _MAX_BUCKETS:
+            return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."}, headers={"Retry-After": "60"})
         calls = _calls[(action, key)]
         while calls and calls[0] < now - window:
             calls.popleft()
