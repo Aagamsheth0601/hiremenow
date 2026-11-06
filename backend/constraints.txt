@@ -97,7 +97,7 @@ mako==1.4.3
     # via alembic
 markupsafe==3.0.3
     # via mako
-oauthlib==4.0.0
+oauthlib==4.0.1
     # via requests-oauthlib
 openai==2.36.0
     # via backend
