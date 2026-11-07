@@ -38,8 +38,10 @@ flowchart TD
     API --> PDF[pypdf text extraction]
     PDF --> Gemini[Gemini structured résumé parsing]
     Gemini --> Profile[Validated profile]
-    API --> YC[Public YC job pages]
+    Schedule[GitHub Actions twice daily] --> Collector[Python collector]
+    Collector --> YC[YC directory search and company job pages]
     YC --> Jobs[Shared job catalogue]
+    Jobs --> DB
     Profile --> Matcher[Deterministic role and skill matching]
     Jobs --> Matcher
     Matcher --> Results[Ranked jobs + match evidence]
@@ -63,6 +65,16 @@ flowchart TD
 
 This is an AI-assisted application workflow, not an autonomous job-application agent.
 
+## Scheduled collection and freshness
+
+GitHub Actions runs `python -m backend.collect` for India and the US twice daily (`23 1,13 * * *`, UTC; actual start times can vary). Its `COLLECTOR_DATABASE_URL` secret must point to the same database as the deployed API's `DATABASE_URL`. Collection does not use a visitor resume or a Gemini key.
+
+Discovery combines the original regional landing page with five public Work at a Startup searches per region. It deduplicates discovered companies, reads their canonical YC jobs pages, filters explicit job locations, and inserts or updates records by source URL. Scheduled runs cap discovery at 200 companies and 50 jobs per company. Search results are source-capped: this is broader coverage, not exhaustive pagination or a guarantee of new matches every day.
+
+`GET /jobs/freshness?region=india` (or `us`) reports collection status, last attempt, last successful completion, staleness, and jobs saved. **Saved means inserted plus updated**, not newly discovered. Job cards distinguish first seen (`scraped_at`) from last checked (`updated_at`). A recent collection does not prove every stored job is still open; automatic retirement of missing jobs is not implemented. Supplemental discovery failures count toward a partial or failed run instead of being silently treated as success.
+
+To populate a local database, run `python -m backend.collect` from `backend/` using its virtual environment after configuring `.env`. Refreshing the browser reads stored jobs; it does not trigger collection.
+
 ## How matching works
 
 The matcher builds a profile from extracted skills, previous job titles, and saved target roles. If no target roles were saved, it uses the résumé's suggested roles.
@@ -77,6 +89,8 @@ The displayed score is on a **0–10 scale**:
 | Both a target-role title match and matching skills | 0.5 points. |
 
 The service calculates a doubled internal score and converts it back to the displayed scale. Cards label scores of 7 or above as strong fit, 4 or above as medium fit, and lower scores as low fit. A separate relevance gate filters jobs using role, experience, and skill evidence before ranking.
+
+The gate does not use the numeric score: it admits a title-role match, a previous-title match, a description-role match with at least two matching skills, or at least three matching skills. Profile refinement changes saved roles and location/work-mode filters; it does not train or fine-tune model weights.
 
 Whole-term matching prevents examples such as `Go` matching `Google`. A small alias map handles variants such as `Node.js`/`nodejs` and `PostgreSQL`/`postgres`. The known-skill vocabulary helps identify missing skills; the résumé's own skills can also match.
 
@@ -169,7 +183,8 @@ Except for health and session creation, the routes below require `Authorization:
 | `GET /resumes/latest/pdf` | Retrieve that visitor's stored PDF. |
 | `POST /resumes/latest/reparse` | Parse the stored extracted text again. |
 | `GET`, `PUT`, `DELETE /preferences` | Read, replace, or clear match preferences. |
-| `POST /jobs/scrape` | Refresh public job data. |
+| `POST /jobs/scrape` | Retired endpoint; returns HTTP 410 because collection is scheduled. |
+| `GET /jobs/freshness` | Read the selected region's collection status and freshness. |
 | `GET /jobs` | Retrieve jobs with filters and personalized match evidence. |
 | `POST /jobs/{id}/enrich` | Resolve available company/contact information. |
 | `POST`, `GET /jobs/{id}/draft` | Generate or retrieve a visitor-owned outreach draft. |
@@ -212,6 +227,7 @@ The repository contains configuration for:
 - **Netlify:** `netlify.toml` builds and publishes `frontend/dist`, with an SPA fallback for client-side routes.
 - **Render:** `render.yaml` starts the FastAPI service with one worker and a `/health` check.
 - **PostgreSQL:** configure a persistent database separately through `DATABASE_URL`. Avoid SQLite on an ephemeral hosting filesystem.
+- **GitHub Actions:** `.github/workflows/collect-jobs.yml` refreshes the shared database independently of the web server; configure `COLLECTOR_DATABASE_URL` in repository secrets.
 
 Set `VITE_BACKEND_URL` before building the frontend, and set the API's `FRONTEND_URL` to the exact deployed frontend origin. Keep database and Gemini credentials on the backend only. Follow [DEPLOYMENT.md](DEPLOYMENT.md) for the deployment sequence and smoke checks.
 
@@ -221,6 +237,7 @@ Set `VITE_BACKEND_URL` before building the frontend, and set the API's `FRONTEND
 backend/
   src/backend/
     main.py              FastAPI setup, lifespan, CORS, cache policy
+    collect.py           Scheduled India and US collection and run history
     visitor.py           Anonymous identities and expiry cleanup
     rate_limit.py        Per-process expensive-action limits
     models/              Résumés, jobs, preferences, drafts, visitor state
@@ -247,7 +264,7 @@ AGENTS.md                Project notes and bug history
 - **Text-based PDFs:** image-only scans have no OCR path and cannot be parsed by the current implementation.
 - **Heuristic relevance:** matching is transparent but is not a learned semantic ranking model. Geography and remote-work rules are also text-based.
 - **AI fallibility:** extracted fields and draft wording can be wrong. Template fallback keeps outreach usable when generation fails, but is not a successful model response.
-- **Small-deployment assumptions:** rate limits are process-local and scraping is request-driven. Scaling would need shared limits and background job coordination.
+- **Small-deployment assumptions:** rate limits are process-local. Collection runs separately in GitHub Actions; contact enrichment and outreach remain request-driven. Scaling would need shared limits and better coordination of expensive work.
 - **Anonymous ownership:** browser-token isolation avoids account onboarding, but does not provide cross-device recovery.
 
-Useful next improvements would be a labeled matching evaluation set, clearer draft-generation provenance, background collection with freshness indicators, and an explicit profile deletion/export flow. These are future work, not claims about the current app.
+Useful next improvements would be a labeled matching evaluation set, clearer draft-generation provenance, separate insert/update history, job retirement based on verified source evidence, and an explicit profile deletion/export flow. These are future work, not claims about the current app.
