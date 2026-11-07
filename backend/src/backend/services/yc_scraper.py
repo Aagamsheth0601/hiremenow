@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import ipaddress
 import re
 import socket
@@ -406,6 +407,83 @@ def _public_job_listings(client: httpx.Client, *, region: str | None, search_ter
     return list(companies.values())
 
 
+def _expanded_job_listings(client, *, region, company_limit, stats):
+    """Supplement the landing page using YC's public directory search.
+
+    Search results are capped by the source, so this improves coverage without
+    claiming an exhaustive catalogue. Company pages supply canonical job URLs.
+    A failed supplemental source marks the run partial, preserving usable jobs.
+    """
+    companies = {}
+    try:
+        for company in _public_job_listings(
+            client, region=region, search_terms=None, company_limit=company_limit
+        ):
+            companies[company['slug']] = company
+    except (httpx.HTTPError, RuntimeError):
+        stats.errors += 1
+        log.warning('YC landing-page discovery failed for %s', region)
+
+    queries = (['India', 'Bangalore', 'Bengaluru'] if region == 'india'
+               else ['United States', 'San Francisco', 'New York'])
+    queries += ['backend engineer', 'software engineer']
+    slugs = dict.fromkeys(companies)
+    for query in queries:
+        try:
+            response = client.get('https://www.workatastartup.com/jobs/search',
+                                  params={'q': query}, timeout=20.0)
+            response.raise_for_status()
+            jobs = response.json()['jobs']
+            if not isinstance(jobs, list):
+                raise ValueError('Invalid jobs response')
+            for job in jobs:
+                slug = job.get('companySlug', '')
+                if re.fullmatch(r'[a-zA-Z0-9-]+', slug):
+                    slugs.setdefault(slug, None)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            stats.errors += 1
+            log.warning('YC directory search failed for query %r', query)
+        time.sleep(REQUEST_DELAY_SECONDS)
+
+    for slug in list(slugs)[:company_limit]:
+        try:
+            response = client.get(f'{YC_BASE}/companies/{slug}/jobs', timeout=20.0)
+            response.raise_for_status()
+            node = BeautifulSoup(response.text, 'html.parser').select_one('[data-page]')
+            if node is None:
+                raise ValueError('Missing company page data')
+            postings = json.loads(node['data-page'])['props']['jobPostings']
+            if not isinstance(postings, list):
+                raise ValueError('Invalid company jobs')
+            for job in postings:
+                path = job['url']
+                if not re.fullmatch(r'/companies/' + re.escape(slug) + r'/jobs/[^/?#]+/?', path):
+                    continue
+                location = job.get('location') or ''
+                # Use explicit location evidence, not the company headquarters
+                # or a search hit. US-only remote jobs must not become India jobs.
+                pattern = (r'\bindia\b|\bIN\b|bangalore|bengaluru|mumbai|hyderabad|delhi|pune|gurugram|chennai'
+                           if region == 'india' else
+                           r'\bUS\b|\bUSA\b|united states|san francisco|new york|seattle|boston|austin|chicago|los angeles|palo alto|mountain view|\bNYC\b')
+                if region and not re.search(pattern, location, re.I):
+                    continue
+                if region == 'india' and re.search(r',\s*IN,\s*US\b', location):
+                    continue  # Indiana is not the country code for India.
+                company = companies.setdefault(slug, {
+                    'slug': slug, 'name': job.get('companyName') or slug,
+                    'one_liner': job.get('companyOneLiner'),
+                    '_job_paths': [], '_job_locations': {},
+                })
+                if path not in company['_job_paths']:
+                    company['_job_paths'].append(path)
+                company['_job_locations'][path] = location
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            stats.errors += 1
+            log.warning('YC company discovery failed for %s', slug)
+        time.sleep(REQUEST_DELAY_SECONDS)
+    return list(companies.values())
+
+
 def _parse_job_page(html: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -514,7 +592,7 @@ def scrape_yc_jobs(
         http2=False,
     ) as client:
         try:
-            companies = _public_job_listings(client, region=region, search_terms=search_terms, company_limit=company_limit)
+            companies = _expanded_job_listings(client, region=region, company_limit=company_limit, stats=stats)
             log.info("YC public listings: %d companies for %s", len(companies), region or "all")
         except (httpx.HTTPError, RuntimeError) as e:
             log.error("YC public jobs search failed: %s", e)

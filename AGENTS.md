@@ -61,3 +61,11 @@
 - Bugs: arbitrary Authorization headers bypassed session-creation limits; reparse had no budget; inactive limiter buckets accumulated. Fix: session creation uses client address, reparse shares upload budget, idle buckets expire and bucket count is capped. Four regression tests pass. Limits remain per-process and are not distributed abuse protection.
 - npm warns that the pre-existing eslint-visitor-keys 5 dependency needs Node 20.19+. The production TypeScript/Vite build passes on 20.11.1; lint-tool compatibility is separate.
 `n- Follow-up: GitHub alerts identified pypdf, certifi, anyio, OAuthLib and Mako in uv.lock. Updated those packages, exported constraints.txt, and made the Render blueprint install with those constraints. All 50 backend tests pass. Existing manually configured Render build commands must also use the constraints to reproduce this environment.
+
+### YC discovery coverage (November 7, 2026)
+- Symptom: repeated collections kept recommending the same small set of jobs.
+- Root cause: discovery used only one public landing page per region.
+- Fix: supplement with five bounded public directory searches per region, deduplicate company slugs, and read canonical company job listings. Preserve existing landing-page results and count supplemental failures so failed coverage is not silently reported as a complete refresh. Search results are source-capped; exhaustive coverage is not claimed.
+- Verification: 52 backend tests passed, including new duplicate, region, and failure-preservation checks. No UI, matching, schema, or production configuration changes.
+- Local tooling: managed worktree creation failed to recognize the existing checkout; used an isolated current clone. Sandboxed test execution stalled; isolated SQLite tests passed outside the sandbox.
+- Live verification: bounded to 15 companies, discovered 91 India job URLs with zero errors. Fetched an AiPrise Software Engineer I listing, inserted it into isolated SQLite, and confirmed the existing jobs API returns it for the supplied target roles (role-only score 3.5/10).
