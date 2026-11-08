@@ -36,10 +36,15 @@ def test_replacement_resume_resets_private_profile_and_skip_uses_resume(monkeypa
             db.add(VisitorJobState(owner_hash=owner, job_id=job.id, is_starred=True))
             db.commit()
 
-        monkeypatch.setattr(
-            "backend.routers.resumes.parse_pdf",
-            lambda _: ("New resume", ParsedResume(skills=["React"], suggested_target_roles=["Frontend Engineer"])),
-        )
+        def parse_without_blocking_event_loop(_):
+            import asyncio
+            import pytest
+            # A synchronous provider call must execute outside the API loop.
+            with pytest.raises(RuntimeError, match="no running event loop"):
+                asyncio.get_running_loop()
+            return "New resume", ParsedResume(skills=["React"], suggested_target_roles=["Frontend Engineer"])
+
+        monkeypatch.setattr("backend.routers.resumes.parse_pdf", parse_without_blocking_event_loop)
         response = client.post(
             "/resumes", headers=headers,
             files={"file": ("new.pdf", b"%PDF-new", "application/pdf")},

@@ -69,3 +69,8 @@
 - Verification: 52 backend tests passed, including new duplicate, region, and failure-preservation checks. No UI, matching, schema, or production configuration changes.
 - Local tooling: managed worktree creation failed to recognize the existing checkout; used an isolated current clone. Sandboxed test execution stalled; isolated SQLite tests passed outside the sandbox.
 - Live verification: bounded to 15 companies, discovered 91 India job URLs with zero errors. Fetched an AiPrise Software Engineer I listing, inserted it into isolated SQLite, and confirmed the existing jobs API returns it for the supplied target roles (role-only score 3.5/10).
+
+### Discovery onboarding and long waits November 8 2026
+- Symptom: new visitors waited on API calls before a silent redirect; failed requests could spin indefinitely. Fix: immediate no-token redirect, explicit upload-required message, server confirmation for existing sessions, and bounded fetch timeouts with visible errors.
+- Symptom: concurrent browsing could be delayed during resume parsing. Root cause: async upload called a synchronous PDF/model function on the event loop. Fix: run parsing in the thread pool; regression test checks no running event loop inside the parser.
+- Verification: 52 backend tests, frontend production build, and Playwright onboarding/region-switch checks at 390/768/1280 pixels. The reported five-minute production delay was not reproduced; current warm reads measured about 0.4–1.8 seconds, and local scoring of 500 public US jobs with a synthetic profile took 5.3 seconds. Duplicate result/count scoring remains a performance opportunity.

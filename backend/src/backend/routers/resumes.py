@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import delete
 from sqlmodel import Session, select
 
@@ -42,7 +43,9 @@ async def upload_resume(
         raise HTTPException(status_code=415, detail="The file is not a PDF.")
 
     try:
-        raw_text, parsed = parse_pdf(pdf_bytes)
+        # PDF extraction and the synchronous model client must not block the
+        # event loop while other visitors request jobs or switch regions.
+        raw_text, parsed = await run_in_threadpool(parse_pdf, pdf_bytes)
     except ResumeParseError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 

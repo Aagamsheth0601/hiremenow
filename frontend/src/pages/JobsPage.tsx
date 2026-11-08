@@ -5,6 +5,7 @@ import MatchFocusForm from "../components/MatchFocusForm";
 
 import {
   apiFetch,
+  hasVisitorSession,
   BACKEND_URL,
   type ApplicationStatus,
   type EmailDraft,
@@ -81,6 +82,12 @@ function timeAgo(iso: string): string {
 }
 
 export default function JobsPage() {
+  // A browser without a token cannot own a resume. Do not wait for the API.
+  if (!hasVisitorSession()) return <Navigate to="/?resumeRequired=1#get-started" replace />;
+  return <VisitorJobsPage />;
+}
+
+function VisitorJobsPage() {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [hasResume, setHasResume] = useState(false);
@@ -178,19 +185,20 @@ export default function JobsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      apiFetch(`${BACKEND_URL}/preferences`),
-      apiFetch(`${BACKEND_URL}/resumes`),
-    ])
-      .then(async ([preferencesResponse, resumesResponse]) => {
-        if (!preferencesResponse.ok || !resumesResponse.ok) throw new Error("Could not load your private profile.");
-        return [await preferencesResponse.json() as Preferences, await resumesResponse.json() as UploadResponse[]] as const;
+    apiFetch(`${BACKEND_URL}/resumes`)
+      .then(async (resumesResponse) => {
+        if (!resumesResponse.ok) throw new Error("Could not load your private profile.");
+        const resumes = await resumesResponse.json() as UploadResponse[];
+        if (!resumes.length) return [null, resumes] as const;
+        const preferencesResponse = await apiFetch(`${BACKEND_URL}/preferences`);
+        if (!preferencesResponse.ok) throw new Error("Could not load your preferences.");
+        return [await preferencesResponse.json() as Preferences, resumes] as const;
       })
       .then(([data, resumes]) => {
         if (cancelled) return;
         setPrefs(data);
         setHasResume(resumes.length > 0);
-        const preferredRegion = locationRegion(data.locations[0] ?? "");
+        const preferredRegion = locationRegion(data?.locations[0] ?? "");
         const homeRegion = locationRegion(resumes[0]?.parsed.contact.location ?? "");
         setRegion(preferredRegion ?? homeRegion ?? "india");
       })
@@ -229,6 +237,7 @@ export default function JobsPage() {
   const pagedJobs = sortedJobs.slice(page * JOBS_PER_PAGE, (page + 1) * JOBS_PER_PAGE);
 
   useEffect(() => {
+    if (prefsLoading || !hasResume) return;
     let cancelled = false;
     setFreshness(null);
     setFreshnessError(false);
@@ -237,7 +246,7 @@ export default function JobsPage() {
       .then(data => { if (!cancelled) setFreshness(data); })
       .catch(() => { if (!cancelled) setFreshnessError(true); });
     return () => { cancelled = true; };
-  }, [region]);
+  }, [region, prefsLoading, hasResume]);
 
   const selectedJob = pagedJobs.find(job => job.id === selectedId) ?? pagedJobs[0];
 
@@ -253,7 +262,7 @@ export default function JobsPage() {
     return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">{profileError}</div>;
   }
 
-  if (!hasResume) return <Navigate to="/#get-started" replace />;
+  if (!hasResume) return <Navigate to="/?resumeRequired=1#get-started" replace />;
 
   const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 
@@ -315,7 +324,7 @@ export default function JobsPage() {
           <div>
             <h2 className="text-sm font-bold text-[#172b4d]">Matches shaped by your resume</h2>
             <p className="mt-1 text-xs leading-5 text-[#596980]">
-              {prefs?.has_saved ? "Your refinements are applied. You can change them anytime." : "We used the roles and skills found in your resume. Fine-tuning is optional."}
+              {prefs?.has_saved ? "Your refinements are applied. You can change them anytime." : "We used the roles and skills found in your resume. Refining your preferences is optional."}
             </p>
           </div>
           <button

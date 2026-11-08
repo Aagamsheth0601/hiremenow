@@ -4,11 +4,38 @@ export const BACKEND_URL =
 const TOKEN_KEY = "hiremenow.visitorToken.v2";
 let tokenPromise: Promise<string> | null = null;
 
+export function hasVisitorSession(): boolean {
+  return Boolean(localStorage.getItem(TOKEN_KEY));
+}
+
+// Bound network waits so a sleeping or unreachable API cannot leave the UI
+// spinning indefinitely. Parsing and drafting have a longer model-call budget.
+async function timedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const slowAction = init.method === "POST" &&
+    (/\/resumes(?:\/latest\/reparse)?$/.test(url) || /\/draft(?:\?|$)/.test(url));
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  init.signal?.addEventListener("abort", abort, { once: true });
+  if (init.signal?.aborted) abort();
+  const timer = window.setTimeout(abort, slowAction ? 90000 : 30000);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("The server took too long to respond. Please try again shortly.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    init.signal?.removeEventListener("abort", abort);
+  }
+}
+
 async function visitorToken(): Promise<string> {
   const saved = localStorage.getItem(TOKEN_KEY);
   if (saved) return saved;
   if (!tokenPromise) {
-    tokenPromise = fetch(`${BACKEND_URL}/sessions`, { method: "POST" })
+    tokenPromise = timedFetch(`${BACKEND_URL}/sessions`, { method: "POST" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not start a private browser session.");
         const data = (await response.json()) as { token: string };
@@ -24,14 +51,14 @@ export async function apiFetch(url: string, init: RequestInit = {}): Promise<Res
   const token = await visitorToken();
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(url, { ...init, headers });
+  const response = await timedFetch(url, { ...init, headers });
   if (response.status !== 401) return response;
 
   // The server may have started with a new database. Create a fresh session.
   localStorage.removeItem(TOKEN_KEY);
   const newToken = await visitorToken();
   headers.set("Authorization", `Bearer ${newToken}`);
-  return fetch(url, { ...init, headers });
+  return timedFetch(url, { ...init, headers });
 }
 
 export type Experience = {

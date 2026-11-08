@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 
 import MatchFocusForm from "../components/MatchFocusForm";
 
@@ -12,6 +12,8 @@ import {
 
 export default function SetupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const resumeRequired = new URLSearchParams(location.search).has("resumeRequired");
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">(
     "idle"
@@ -152,6 +154,7 @@ export default function SetupPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      {resumeRequired && !hasResume && <p role="status" className="rounded-xl border border-slate-300 bg-white p-4 text-sm text-slate-800">Please upload your resume and review your details to view Discover Jobs. Preferences are optional.</p>}
       {hasResume && status !== "done" && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5"><div><strong>Your resume is ready.</strong><p className="mt-1 text-sm text-slate-600">Preferences are optional. You can go straight to your matches.</p></div><Link to="/jobs" className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-bold text-white">Back to matches →</Link></div>}
       <section className="profile-hero">
         <div className="hero-copy">
