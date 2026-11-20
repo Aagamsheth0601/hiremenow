@@ -2,7 +2,7 @@ import { COUNTRIES, locationRegion } from "../lib/location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import MatchFocusForm from "../components/MatchFocusForm";
-import { clearJobCache, readJobCache, saveJobCache } from "../lib/jobCache";
+import { clearJobCache, readJobCache, saveJobCache, updateJobCache } from "../lib/jobCache";
 
 import {
   apiFetch,
@@ -115,6 +115,7 @@ function VisitorJobsPage() {
   const [hasResume, setHasResume] = useState(false);
   const [resumeKey, setResumeKey] = useState("");
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileAttempt, setProfileAttempt] = useState(0);
   const [refineOpen, setRefineOpen] = useState(false);
   const [jobs, setJobs] = useState<Job[]>(initialCache?.jobs ?? []);
   const [jobsLoading, setJobsLoading] = useState(!initialCache);
@@ -199,7 +200,6 @@ function VisitorJobsPage() {
 
   const handleStatusChange = useCallback(
     (jobId: number, newStatus: ApplicationStatus | null) => {
-      clearJobCache();
       ++jobsRequest.current;
       setShowingCache(false);
       const matchesFilter =
@@ -208,41 +208,43 @@ function VisitorJobsPage() {
         (statusFilter === "active" && newStatus === null) ||
         statusFilter === newStatus;
 
-      setJobs((prev) =>
-        matchesFilter
+      const updatedAt = newStatus ? new Date().toISOString() : null;
+      const update = (prev: Job[]) => matchesFilter
           ? prev.map((j) =>
               j.id === jobId
                 ? {
                     ...j,
                     application_status: newStatus,
-                    status_updated_at: newStatus ? new Date().toISOString() : null,
+                    status_updated_at: updatedAt,
                   }
                 : j,
             )
-          : prev.filter((j) => j.id !== jobId),
-      );
+          : prev.filter((j) => j.id !== jobId);
+      setJobs(update);
+      updateJobCache(visitorCacheScope(), profileKey, region, statusFilter, update);
       loadCounts(region);
     },
-    [loadCounts, region, statusFilter],
+    [loadCounts, profileKey, region, statusFilter],
   );
 
   const handleStarChange = useCallback(
     (jobId: number, isStarred: boolean) => {
-      clearJobCache();
       ++jobsRequest.current;
       setShowingCache(false);
-      setJobs((prev) =>
-        statusFilter === "starred" && !isStarred
+      const update = (prev: Job[]) => statusFilter === "starred" && !isStarred
           ? prev.filter((j) => j.id !== jobId)
-          : prev.map((j) => (j.id === jobId ? { ...j, is_starred: isStarred } : j)),
-      );
+          : prev.map((j) => (j.id === jobId ? { ...j, is_starred: isStarred } : j));
+      setJobs(update);
+      updateJobCache(visitorCacheScope(), profileKey, region, statusFilter, update);
       loadCounts(region);
     },
-    [loadCounts, region, statusFilter],
+    [loadCounts, profileKey, region, statusFilter],
   );
 
   useEffect(() => {
     let cancelled = false;
+    setProfileError(null);
+    setPrefsLoading(true);
     apiFetch(`${BACKEND_URL}/resumes`)
       .then(async (resumesResponse) => {
         if (!resumesResponse.ok) throw new Error("Could not load your private profile.");
@@ -279,7 +281,7 @@ function VisitorJobsPage() {
     return () => {
       cancelled = true;
     };
-  }, [initialCache]);
+  }, [initialCache, profileAttempt]);
 
   useEffect(() => {
     if (prefsLoading || !hasResume) return;
@@ -317,6 +319,9 @@ function VisitorJobsPage() {
   }, [region, prefsLoading, hasResume]);
 
   const selectedJob = pagedJobs.find(job => job.id === selectedId) ?? pagedJobs[0];
+  const cachedProfileUnavailable = Boolean(profileError && showingCache && initialCache?.scope === visitorCacheScope());
+  const checkingProfile = prefsLoading || cachedProfileUnavailable;
+  const retryProfile = () => setProfileAttempt(attempt => attempt + 1);
 
   if (prefsLoading && !initialCache) {
     return (
@@ -326,11 +331,14 @@ function VisitorJobsPage() {
     );
   }
 
-  if (profileError) {
-    return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">{profileError}</div>;
+  if (profileError && !cachedProfileUnavailable) {
+    return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">
+      <p role="alert">{profileError}</p>
+      <button type="button" onClick={retryProfile} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 font-semibold">Retry loading profile</button>
+    </div>;
   }
 
-  if (!prefsLoading && !hasResume) return <ResumeGate />;
+  if (!checkingProfile && !hasResume) return <ResumeGate />;
 
   const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 
@@ -349,7 +357,7 @@ function VisitorJobsPage() {
               Search country
               <select
               id="job-country"
-              disabled={countrySaving || prefsLoading || !prefs}
+              disabled={countrySaving || checkingProfile || !prefs}
               value={region}
               onChange={async (event) => {
                 const nextRegion = event.target.value as "india" | "us";
@@ -397,7 +405,7 @@ function VisitorJobsPage() {
           <button
             type="button"
             aria-expanded={refineOpen}
-            disabled={prefsLoading || !prefs}
+            disabled={checkingProfile || !prefs}
             aria-controls="refine-matches"
             onClick={() => setRefineOpen((open) => !open)}
             className="min-h-10 shrink-0 rounded-xl border border-[#c8d6c8] bg-[#edf5e7] px-4 py-2 text-sm font-semibold text-[#075e51] hover:bg-[#deeedb]"
@@ -438,7 +446,7 @@ function VisitorJobsPage() {
               key={f.value}
               type="button"
               aria-pressed={active}
-              disabled={prefsLoading}
+              disabled={checkingProfile}
               onClick={() => setStatusFilter(f.value)}
               className={`rounded-full border px-3 py-1 text-xs transition ${
                 active
@@ -470,7 +478,11 @@ function VisitorJobsPage() {
       </div>
 
       {countsError && <p role="status" className="text-sm text-slate-700">Job filter counts are unavailable. You can still use the filters.</p>}
-      {showingCache && !jobsError && <p role="status" className="text-sm text-slate-700">Showing your last results while we check for updates.</p>}
+      {cachedProfileUnavailable && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <p role="alert">Showing your last results. We couldn’t verify your profile.</p>
+        <button type="button" onClick={retryProfile} className="rounded-lg border border-amber-400 bg-white px-3 py-2 font-semibold">Retry loading profile</button>
+      </div>}
+      {showingCache && !jobsError && !cachedProfileUnavailable && <p role="status" className="text-sm text-slate-700">Showing your last results while we check for updates.</p>}
       {jobsError && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
         <p role="alert">{jobsError}</p>
         <button type="button" onClick={() => { void loadJobs(region, statusFilter); void loadCounts(region); }} className="rounded-lg border border-red-300 bg-white px-3 py-2 font-semibold">Retry loading jobs</button>
@@ -524,7 +536,7 @@ function VisitorJobsPage() {
             </section>
             <section id="job-detail" className="job-detail" aria-label="Selected job details">
               <div className="detail-label">Selected role</div>
-              {prefsLoading ? <p className="p-5 text-sm text-slate-700">Checking your profile before opening job details…</p> :
+              {checkingProfile ? <p className="p-5 text-sm text-slate-700">Job details are available once we verify your profile.</p> :
                 <ul>{selectedJob && <JobCard key={selectedJob.id} job={selectedJob} onStatusChange={handleStatusChange} onStarChange={handleStarChange}/>}</ul>}
             </section>
           </div>

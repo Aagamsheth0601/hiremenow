@@ -3,6 +3,7 @@
 ## Bug log / gotchas
 
 - Discover used a green bar for every fit score and kept the selected card's old data after a refresh. Use shared score thresholds for the list and selected card, and sync the selected card when fresh results arrive. The first build rejected the `inert` prop with the current React types. Cached cards now appear immediately and job actions appear after profile verification.
+- Closing the tab discarded cached Discover matches because the first cache used session storage. The earlier browser check only refreshed the same tab. Store one recent, session-scoped result snapshot in local storage for up to 24 hours. If profile verification fails, keep cached cards visible with a retry and leave job actions disabled until verification succeeds.
 
 - Scheduled YC refreshes returned partial results after hundreds of failed requests. Run 44621217852 showed repeated HTTP 429s during job detail fetching. The collector now stops on the first 429 across both regions, saves work already processed, and reports incomplete collection without advancing the last successful refresh.
 - Run 44786789213 also hit HTTP 429 during discovery, before any jobs were saved. The daily incremental collector bounds requests, rotates known companies, batches listing checks, and downloads descriptions only for jobs awaiting detail. Two complete checks at least 20 hours apart are required to hide a missing listing. A bounded live smoke test in isolated SQLite saved 3 India and 10 US jobs with zero errors. Production still needs verification.
