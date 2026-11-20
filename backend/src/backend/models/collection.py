@@ -13,3 +13,19 @@ class CollectionRun(SQLModel, table=True):
     jobs_seen: int = 0
     jobs_saved: int = 0
     errors: int = 0
+
+
+class CompanyCatalogueCheck(SQLModel, table=True):
+    __tablename__ = "company_catalogue_checks"
+
+    slug: str = Field(primary_key=True)
+    checked_at: datetime
+
+
+class JobCatalogueState(SQLModel, table=True):
+    __tablename__ = "job_catalogue_states"
+
+    job_id: int = Field(primary_key=True, foreign_key="jobs.id")
+    first_missing_at: datetime | None = None
+    closed_at: datetime | None = None
+    needs_details: bool = False

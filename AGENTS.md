@@ -3,6 +3,7 @@
 ## Bug log / gotchas
 
 - Scheduled YC refreshes returned partial results after hundreds of failed requests. Run 44621217852 showed repeated HTTP 429s during job detail fetching. The collector now stops on the first 429 across both regions, saves work already processed, and reports incomplete collection without advancing the last successful refresh.
+- Run 44786789213 also hit HTTP 429 during discovery, before any jobs were saved. The daily incremental collector bounds requests, rotates known companies, batches listing checks, and downloads descriptions only for jobs awaiting detail. Two complete checks at least 20 hours apart are required to hide a missing listing. A bounded live smoke test in isolated SQLite saved 3 India and 10 US jobs with zero errors. Production still needs verification.
 - The upload page could show a saved-profile request failure as a service outage during an upload. First-time visitors now skip account reads, and upload feedback appears in the form. On an initial build attempt the sandbox denied linking the installed dependencies, leaving TypeScript unavailable. The build passed after reusing the installation with the identical lockfile outside the sandbox. Playwright verified an upload failure and retry at 390, 768, and 1280px. Production accepted a synthetic PDF in 2.36 seconds before the change.
 
 | Symptom | Root cause | Fix / status |

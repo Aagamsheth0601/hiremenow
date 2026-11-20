@@ -67,7 +67,7 @@ This is an AI-assisted application workflow, not an autonomous job-application a
 
 ## Scheduled collection and freshness
 
-GitHub Actions runs `python -m backend.collect` for India and the US twice daily (`23 1,13 * * *`, UTC; actual start times can vary). Its `COLLECTOR_DATABASE_URL` secret must point to the same database as the deployed API's `DATABASE_URL`. Collection does not use a visitor resume or a Gemini key.
+GitHub Actions runs `python -m backend.collect` for India and the US daily (`23 1 * * *`, UTC; actual start times can vary). Its `COLLECTOR_DATABASE_URL` secret must point to the same database as the deployed API's `DATABASE_URL`. Collection does not use a visitor resume or a Gemini key.
 
 Discovery combines the original regional landing page with five public Work at a Startup searches per region. It deduplicates discovered companies, reads their canonical YC jobs pages, filters explicit job locations, and inserts or updates records by source URL. Scheduled runs cap discovery at 200 companies and 50 jobs per company. Search results are source-capped: this is broader coverage, not exhaustive pagination or a guarantee of new matches every day.
 

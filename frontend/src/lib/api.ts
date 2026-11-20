@@ -135,6 +135,7 @@ export type Job = {
   application_status: ApplicationStatus | null;
   status_updated_at: string | null;
   is_starred: boolean;
+  is_closed?: boolean;
   draft_kinds: string[];
   source_url: string;
   scraped_at: string;

@@ -315,7 +315,7 @@ function VisitorJobsPage() {
             <>YC catalogue: {freshness.last_success_at ? `last refreshed ${timeAgo(freshness.last_success_at)}` : "awaiting its first successful collection"}.
             {freshness.status === "running" ? " Collection is running." : ["failed", "partial", "interrupted"].includes(freshness.status) ? " The latest collection was incomplete; older listings remain available." : ""}
             {freshness.stale && freshness.last_success_at ? " Refresh is overdue." : ""}
-            {" "}Collection is scheduled every 12 hours; start times can vary. Verify availability on YC.</>}
+            {" "}Collection runs daily; start times can vary. Verify availability on YC.</>}
         </p>
       </header>
 
@@ -440,7 +440,7 @@ function VisitorJobsPage() {
                   aria-pressed={selectedJob?.id === job.id}
                   onClick={() => { setSelectedId(job.id); if (window.innerWidth < 768) document.getElementById("job-detail")?.scrollIntoView({behavior:"smooth",block:"start"}); }}>
                   <span className="row-company">{job.company_name}<span>{job.is_starred ? "★ Saved" : "YC"}</span></span>
-                  <strong>{job.title}</strong>
+                  <strong>{job.title}{job.is_closed && " · No longer listed on YC"}</strong>
                   <span className="row-location">{job.locations.join(" · ") || "Location not specified"}</span>
                   <span className="row-bottom"><span>{job.match_score ?? "—"}/10 match</span><span>View role →</span></span>
                 </button>

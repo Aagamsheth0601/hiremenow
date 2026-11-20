@@ -9,6 +9,8 @@ from sqlmodel import Session, func, select
 
 from backend.db import get_session
 from backend.models import Draft, Job, JobPreferences, Resume, VisitorJobState
+from backend.models.collection import JobCatalogueState
+from backend.services.job_regions import matches_region as _matches_region
 from backend.services.matcher import build_profile, passes_threshold, score_job, search_terms_from_profile
 from backend.services.outreach import (
     OutreachError,
@@ -67,40 +69,6 @@ class StarPayload(BaseModel):
 class EnrichBatchPayload(BaseModel):
     job_ids: list[int]
     force: bool = False
-
-_INDIA_TERMS = (
-    "india", "bangalore", "bengaluru", "mumbai", "delhi", "hyderabad",
-    "pune", "chennai", "gurgaon", "gurugram", "noida", "kolkata",
-    "ahmedabad", "jaipur",
-)
-_US_TERMS = (
-    "united states", "usa", "u.s.", "san francisco", "new york", "nyc",
-    "los angeles", "boston", "seattle", "chicago", "austin", "denver",
-    "miami", "atlanta", "dallas", "houston", "san jose", "palo alto",
-    "mountain view", "menlo park", "berkeley", "oakland", "sunnyvale",
-    "santa clara", "redwood city", "cambridge",
-)
-_US_STATE_RE = re.compile(r",\s*[A-Z]{2}\b")
-
-
-def _matches_region(locations: list[str], region: str, *, title: str = "") -> bool:
-    blob = " ".join(locations or []).lower()
-    if title:
-        blob += " " + title.lower()
-    raw = " ".join(locations or []) + " " + title
-    is_india = any(t in blob for t in _INDIA_TERMS) or bool(re.search(r"\bIN\b", raw))
-    is_us = any(t in blob for t in _US_TERMS) or bool(re.search(r"\b(?:us|usa)\b", blob.replace(".", ""))) or bool(_US_STATE_RE.search(raw))
-    is_remote = "remote" in blob
-    if is_remote and not is_india and not is_us:
-        return True
-    if region == "india":
-        return is_india
-    if region == "us":
-        if is_india:
-            return False
-        return is_us
-    return True
-
 
 def _matches_refinements(job: Job, prefs: JobPreferences | None) -> bool:
     """Apply only the optional controls exposed in Refine my matches."""
@@ -165,7 +133,7 @@ def collection_freshness(
     return {"source": "Y Combinator", "region": region, "status": state,
             "last_attempt_at": iso(latest.started_at) if latest else None,
             "last_success_at": iso(last_success),
-            "stale": last_success is None or datetime.now(timezone.utc) - last_success.replace(tzinfo=timezone.utc) > timedelta(hours=13),
+            "stale": last_success is None or datetime.now(timezone.utc) - last_success.replace(tzinfo=timezone.utc) > timedelta(hours=27),
             "jobs_saved": latest.jobs_saved if latest else 0}
 
 
@@ -173,7 +141,8 @@ def collection_freshness(
 def jobs_count(
     session: Session = Depends(get_session), owner_hash: str = Depends(get_visitor_hash)
 ) -> dict:
-    total = session.exec(select(func.count(Job.id))).one()
+    closed = select(JobCatalogueState.job_id).where(JobCatalogueState.closed_at.is_not(None))
+    total = session.exec(select(func.count(Job.id)).where(Job.id.not_in(closed))).one()
     return {"total": total}
 
 
@@ -200,6 +169,12 @@ def list_jobs(
         all_rows = [j for j in all_rows if _matches_refinements(j, prefs)]
 
     states = _states_for(session, owner_hash, [j.id for j in all_rows if j.id is not None])
+    closed = _closed_job_ids(session)
+    drafted = _closed_draft_job_ids(session, owner_hash, closed) if application_status != "active" else set()
+    all_rows = [
+        j for j in all_rows
+        if _visible_in_discover(j.id, closed, states, drafted, include_tracked=application_status != "active")
+    ]
     if application_status and application_status != "all":
         if application_status == "active":
             all_rows = [j for j in all_rows if states.get(j.id) is None or states[j.id].application_status is None]
@@ -223,14 +198,32 @@ def list_jobs(
         page_ids = [j.id for j, _, _ in page if j.id is not None]
         kinds_map = _draft_kinds_for(session, owner_hash, page_ids)
         return [
-            _serialize(j, score=_to_ten(s), match_details=details, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id))
+            _serialize(j, score=_to_ten(s), match_details=details, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id), is_closed=j.id in closed)
             for j, s, details in page
         ]
 
     page_rows = all_rows[offset : offset + limit]
     page_ids = [j.id for j in page_rows if j.id is not None]
     kinds_map = _draft_kinds_for(session, owner_hash, page_ids)
-    return [_serialize(j, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id)) for j in page_rows]
+    return [_serialize(j, draft_kinds=kinds_map.get(j.id, []), state=states.get(j.id), is_closed=j.id in closed) for j in page_rows]
+
+
+def _closed_job_ids(session: Session) -> set[int]:
+    return set(session.exec(select(JobCatalogueState.job_id).where(JobCatalogueState.closed_at.is_not(None))))
+
+
+def _closed_draft_job_ids(session: Session, owner_hash: str, closed: set[int]) -> set[int]:
+    if not closed:
+        return set()
+    drafts = session.exec(select(Draft.job_id).where(Draft.owner_hash == owner_hash)).all()
+    return closed.intersection(drafts)
+
+
+def _visible_in_discover(job_id, closed, states, drafted, *, include_tracked: bool) -> bool:
+    if job_id not in closed:
+        return True
+    state = states.get(job_id)
+    return bool(include_tracked and (job_id in drafted or (state and (state.is_starred or state.application_status))))
 
 
 def _draft_kinds_for(session: Session, owner_hash: str, job_ids: list[int]) -> dict[int, list[str]]:
@@ -386,6 +379,7 @@ def enrich_batch(
 def _serialize(
     j: Job, *, score: float | None = None, match_details: dict | None = None,
     draft_kinds: list[str] | None = None, state: VisitorJobState | None = None,
+    is_closed: bool = False,
 ) -> dict:
     out = {
         "id": j.id,
@@ -405,6 +399,7 @@ def _serialize(
         "application_status": state.application_status if state else None,
         "status_updated_at": state.status_updated_at.isoformat() if state and state.status_updated_at else None,
         "is_starred": bool(state.is_starred) if state else False,
+        "is_closed": is_closed,
         "source_url": j.source_url,
         "scraped_at": j.scraped_at.replace(tzinfo=timezone.utc).isoformat(),
         "last_checked_at": j.updated_at.replace(tzinfo=timezone.utc).isoformat(),
@@ -482,15 +477,18 @@ def status_counts(
         rows = [j for j in rows if _matches_refinements(j, prefs) and passes_threshold(*score_job(j, profile))]
 
     states = _states_for(session, owner_hash, [j.id for j in rows if j.id is not None])
+    closed = _closed_job_ids(session)
+    drafted = _closed_draft_job_ids(session, owner_hash, closed)
+    rows = [j for j in rows if _visible_in_discover(j.id, closed, states, drafted, include_tracked=True)]
 
     counts = {"all": len(rows), "active": 0, "starred": 0}
     for s in APPLICATION_STATUSES:
         counts[s] = 0
     for j in rows:
         state = states.get(j.id)
-        if state is None or state.application_status is None:
+        if j.id not in closed and (state is None or state.application_status is None):
             counts["active"] += 1
-        elif state.application_status in counts:
+        elif state and state.application_status in counts:
             counts[state.application_status] += 1
         if state and state.is_starred:
             counts["starred"] += 1
