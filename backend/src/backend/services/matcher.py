@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from backend.models import Job, JobPreferences, Resume
 
@@ -108,6 +109,16 @@ def _phrase_hits(phrases: list[str], text: str) -> int:
     return sum(1 for p in phrases if p and _contains_phrase(text_lc, p))
 
 
+@lru_cache(maxsize=1024)
+def _known_skills_in_listing(title: str, description: str) -> tuple[str, ...]:
+    # Public listing text is the key, so edits invalidate old results and no
+    # résumé or visitor preferences are retained in this shared cache.
+    return tuple(
+        skill for skill in _KNOWN_SKILLS
+        if _contains_phrase(description, skill.lower()) or _contains_phrase(title, skill.lower())
+    )
+
+
 def score_job(job: Job, profile: MatchProfile) -> tuple[float, dict]:
     title = job.title or ""
     desc = job.description or ""
@@ -122,7 +133,7 @@ def score_job(job: Job, profile: MatchProfile) -> tuple[float, dict]:
     # should not automatically outrank a focused resume with the relevant skills.
     resume_skills = list(dict.fromkeys(profile.skill_phrases))
     mentioned_resume_skills = [s for s in resume_skills if _contains_phrase(desc_lc, s) or _contains_phrase(title_lc, s)]
-    known_in_job = [s for s in _KNOWN_SKILLS if _contains_phrase(desc_lc, s.lower()) or _contains_phrase(title_lc, s.lower())]
+    known_in_job = _known_skills_in_listing(title_lc, desc_lc)
     matched_known = [s for s in known_in_job if any(_contains_phrase(s.lower(), r) or _contains_phrase(r, s.lower()) for r in resume_skills)]
     missing_skills = [s for s in known_in_job if s not in matched_known]
     matched_skills = list(dict.fromkeys(mentioned_resume_skills))
