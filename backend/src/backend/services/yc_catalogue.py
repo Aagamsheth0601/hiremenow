@@ -115,6 +115,7 @@ class IncrementalCatalogue:
 
     def _apply(self, session, region, selected, by_company, checks, client, stats):
         pending = []
+        present_ids = {}
         for slug in selected:
             try:
                 if slug not in self.snapshots:
@@ -127,9 +128,17 @@ class IncrementalCatalogue:
                 continue
             postings = self.snapshots[slug]
             stats.companies_visited += 1
-            known = {_job_key(job.source_url): job for job in by_company.get(slug, [])}
+            known = {}
+            present_ids[slug] = set()
+            for job in sorted(by_company.get(slug, []), key=lambda item: item.id):
+                known.setdefault(_job_key(job.source_url), []).append(job)
             for key, posting in postings.items():
-                job = known.get(key)
+                source_url = f"{YC_BASE}{posting['url']}"
+                candidates = known.get(key, [])
+                # Legacy rows were keyed by full URL. Prefer its current owner
+                # when an older title slug and the new slug already coexist.
+                job = next((row for row in candidates if row.source_url == source_url),
+                           candidates[0] if candidates else None)
                 title = posting["title"]
                 location = posting.get("location") or ""
                 if job is None and not matches_region([location], region, title=title):
@@ -138,7 +147,7 @@ class IncrementalCatalogue:
                 if job is None:
                     skills = posting.get("skills") or []
                     job = Job(
-                        source_url=f"{YC_BASE}{posting['url']}", yc_job_id=key,
+                        source_url=source_url, yc_job_id=key,
                         title=title, company_slug=slug,
                         company_name=posting.get("companyName") or slug,
                         company_one_liner=posting.get("companyOneLiner"),
@@ -153,11 +162,12 @@ class IncrementalCatalogue:
                 else:
                     state = session.get(JobCatalogueState, job.id)
                     job.title = title
-                    job.source_url = f"{YC_BASE}{posting['url']}"
+                    job.source_url = source_url
                     job.yc_job_id = key
                     stats.jobs_updated += 1
                 job.locations = [location] if location else job.locations
                 job.updated_at = self.now
+                present_ids[slug].add(job.id)
                 if state:
                     state.first_missing_at = None
                     state.closed_at = None
@@ -185,7 +195,7 @@ class IncrementalCatalogue:
             return stats
         for slug in set(selected) - self.reconciled:
             for job in by_company.get(slug, []):
-                if _job_key(job.source_url) in self.snapshots[slug]:
+                if job.id in present_ids[slug]:
                     continue
                 state = session.get(JobCatalogueState, job.id) or JobCatalogueState(job_id=job.id)
                 if state.first_missing_at is None:

@@ -92,3 +92,40 @@ def test_daily_incremental_refresh_and_closure(monkeypatch):
         assert run(session, 120)[0].status == "completed"
         assert session.get(JobCatalogueState, job_id).closed_at is None
         assert list_jobs(**args, application_status="active", owner_hash="owner")[0]["id"] == job_id
+
+
+def test_existing_canonical_url_is_reused_when_old_title_slug_also_exists(monkeypatch):
+    monkeypatch.setattr(yc_catalogue, "REQUEST_DELAY_SECONDS", 0)
+    monkeypatch.setattr(yc_catalogue, "_public_job_listings", lambda *a, **kw: [{"slug": "example"}])
+    path = "/companies/example/jobs/Ab12Cd3-current"
+    page = {"component": "WaasShowJobsPage", "props": {
+        "company": {}, "jobPostings": [{"url": path, "title": "Engineer", "location": "Remote (US)"}],
+    }}
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, text=f'<div data-page="{html.escape(json.dumps(page))}"></div>')
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        current = Job(source_url=f"{yc_catalogue.YC_BASE}{path}", title="Current title",
+                      description="Already enriched", company_slug="example", company_name="Example",
+                      locations=["Remote (US)"])
+        duplicate = Job(source_url=f"{yc_catalogue.YC_BASE}/companies/example/jobs/Ab12Cd3-old",
+                        title="Old title", company_slug="example", company_name="Example",
+                        locations=["Remote (US)"])
+        session.add_all([current, duplicate])
+        session.commit()
+        session.add(VisitorJobState(owner_hash="owner", job_id=duplicate.id, is_starred=True))
+        session.commit()
+
+        refresh = yc_catalogue.IncrementalCatalogue(transport=httpx.MockTransport(respond))
+        result = collect_region(session, "us", refresh.collect)
+        assert (result.status, result.jobs_saved, result.errors) == ("completed", 1, 0)
+        assert calls == ["/companies/example/jobs"]
+        assert current.title == "Engineer" and current.description == "Already enriched"
+        assert duplicate.source_url.endswith("-old")
+        assert session.exec(select(VisitorJobState)).one().job_id == duplicate.id
+        assert session.get(JobCatalogueState, duplicate.id).first_missing_at is not None

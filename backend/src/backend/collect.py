@@ -1,5 +1,6 @@
 """Run with python -m backend.collect. No resume or Gemini key is used."""
 import logging
+import re
 from datetime import datetime, timezone
 from sqlmodel import Session
 from backend.db import engine, init_db
@@ -25,12 +26,16 @@ def collect_region(session: Session, region: str, scrape=scrape_yc_jobs) -> Coll
             run.status = "completed"
         else:
             run.status = "partial" if run.jobs_saved else "failed"
-    except Exception:
+    except Exception as exc:
         session.rollback()
         run.status = "failed"
         run.errors += 1
         # Avoid logging database connection details or provider payloads.
-        log.error("Collection failed for %s", region)
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        if isinstance(sqlstate, str) and re.fullmatch(r"[A-Z0-9]{5}", sqlstate):
+            log.error("Collection failed for %s (%s, SQLSTATE %s)", region, type(exc).__name__, sqlstate)
+        else:
+            log.error("Collection failed for %s (%s)", region, type(exc).__name__)
     run.finished_at = datetime.now(timezone.utc)
     session.add(run)
     session.commit()
