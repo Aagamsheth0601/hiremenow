@@ -2,6 +2,8 @@
 
 ## Bug log / gotchas
 
+- Scheduled YC refreshes returned partial results after hundreds of failed requests. Run 44621217852 showed repeated HTTP 429s during job detail fetching. The collector now stops on the first 429 across both regions, saves work already processed, and reports incomplete collection without advancing the last successful refresh.
+
 | Symptom | Root cause | Fix / status |
 | --- | --- | --- |
 | Backend tests could not start: the `.venv` launcher tried to use a missing Python 3.10 executable. | The local Python installation referenced by the virtual environment was gone. | Rebuilt `.venv` with Python 3.10.21 and verified the health endpoint. |

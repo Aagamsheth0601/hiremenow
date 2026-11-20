@@ -1,10 +1,11 @@
 """Run with python -m backend.collect. No resume or Gemini key is used."""
 import logging
 from datetime import datetime, timezone
+from functools import partial
 from sqlmodel import Session
 from backend.db import engine, init_db
 from backend.models.collection import CollectionRun
-from backend.services.yc_scraper import scrape_yc_jobs
+from backend.services.yc_scraper import YCRateLimit, scrape_yc_jobs
 
 log = logging.getLogger(__name__)
 
@@ -36,9 +37,10 @@ def collect_region(session: Session, region: str, scrape=scrape_yc_jobs) -> Coll
 def main():
     init_db()
     failed = False
+    scrape = partial(scrape_yc_jobs, rate_limit=YCRateLimit())
     for region in ("india", "us"):
         with Session(engine) as session:
-            run = collect_region(session, region)
+            run = collect_region(session, region, scrape=scrape)
             print(f"{region}: {run.status}; companies={run.companies}; saved={run.jobs_saved}; errors={run.errors}")
             failed = failed or run.status != "completed"
     if failed:

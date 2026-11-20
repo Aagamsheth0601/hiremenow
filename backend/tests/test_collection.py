@@ -1,10 +1,14 @@
 from datetime import datetime, timedelta, timezone
+from functools import partial
+
+import httpx
 from sqlmodel import Session, SQLModel, create_engine, select
 from backend.collect import collect_region
 from backend.models import Job
 from backend.models.collection import CollectionRun
 from backend.services.yc_scraper import ScrapeStats, _upsert_job
 from backend.routers.jobs import collection_freshness, _serialize
+from backend.services import yc_scraper
 
 
 def test_refresh_preserves_first_seen_and_advances_last_checked():
@@ -50,3 +54,33 @@ def test_partial_and_interrupted_runs_are_not_success():
         session.add(CollectionRun(region='us',started_at=datetime.now(timezone.utc)-timedelta(hours=3)))
         session.commit()
         assert collection_freshness('us',session,'test')['status'] == 'interrupted'
+
+
+def test_rate_limit_stops_both_regions_and_preserves_saved_jobs(monkeypatch):
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    paths = [f"/companies/example/jobs/{number}" for number in range(3)]
+    requests = []
+
+    def respond(request):
+        requests.append(request.url.path)
+        return httpx.Response(200, text="job") if len(requests) == 1 else httpx.Response(429)
+
+    client = partial(httpx.Client, transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(yc_scraper.httpx, "Client", client)
+    monkeypatch.setattr(yc_scraper, "REQUEST_DELAY_SECONDS", 0)
+    monkeypatch.setattr(yc_scraper, "_expanded_job_listings", lambda *args, **kwargs: [{
+        "slug": "example", "name": "Example", "_job_paths": paths, "_job_locations": {},
+    }])
+    monkeypatch.setattr(yc_scraper, "_parse_job_page", lambda html: {
+        "title": "Engineer", "description": "Python", "locations": [],
+    })
+    scrape = partial(yc_scraper.scrape_yc_jobs, rate_limit=yc_scraper.YCRateLimit())
+
+    with Session(engine) as session:
+        india = collect_region(session, "india", scrape)
+        us = collect_region(session, "us", scrape)
+        assert (india.status, india.jobs_saved, india.errors) == ("partial", 1, 1)
+        assert (us.status, us.jobs_saved, us.errors) == ("failed", 0, 1)
+        assert session.exec(select(Job)).one().title == "Engineer"
+    assert requests == paths[:2]

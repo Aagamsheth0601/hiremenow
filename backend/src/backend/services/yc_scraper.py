@@ -52,6 +52,21 @@ class ScrapeStats:
     errors: int = 0
 
 
+class YCRateLimited(Exception):
+    """Stop collection when YC asks us to back off."""
+
+
+class YCRateLimit:
+    def __init__(self) -> None:
+        self.blocked = False
+
+    def check_response(self, response: httpx.Response) -> None:
+        if response.status_code == 429:
+            self.blocked = True
+            log.warning("YC returned HTTP 429; stopping collection for this run")
+            raise YCRateLimited
+
+
 def _algolia_query(
     client: httpx.Client,
     *,
@@ -577,8 +592,14 @@ def scrape_yc_jobs(
     region: str | None = None,
     search_terms: list[str] | None = None,
     match_profile: MatchProfile | None = None,
+    rate_limit: YCRateLimit | None = None,
 ) -> ScrapeStats:
     stats = ScrapeStats()
+    rate_limit = rate_limit or YCRateLimit()
+    if rate_limit.blocked:
+        log.warning("Skipping %s collection after YC rate limited an earlier region", region)
+        stats.errors += 1
+        return stats
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml",
@@ -590,10 +611,14 @@ def scrape_yc_jobs(
         follow_redirects=True,
         limits=HTTP_LIMITS,
         http2=False,
+        event_hooks={"response": [rate_limit.check_response]},
     ) as client:
         try:
             companies = _expanded_job_listings(client, region=region, company_limit=company_limit, stats=stats)
             log.info("YC public listings: %d companies for %s", len(companies), region or "all")
+        except YCRateLimited:
+            stats.errors += 1
+            return stats
         except (httpx.HTTPError, RuntimeError) as e:
             log.error("YC public jobs search failed: %s", e)
             stats.errors += 1
@@ -611,7 +636,12 @@ def scrape_yc_jobs(
             for path in job_paths:
                 stats.jobs_seen += 1
                 job_url = f"{YC_BASE}{path}"
-                job_html = _fetch(client, job_url)
+                try:
+                    job_html = _fetch(client, job_url)
+                except YCRateLimited:
+                    stats.errors += 1
+                    session.commit()
+                    return stats
                 time.sleep(REQUEST_DELAY_SECONDS)
                 if job_html is None:
                     stats.errors += 1
