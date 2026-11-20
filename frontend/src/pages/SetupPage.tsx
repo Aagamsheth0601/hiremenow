@@ -171,28 +171,30 @@ export default function SetupPage() {
       {hasResume && status !== "done" && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5"><div><strong>Your resume is ready.</strong><p className="mt-1 text-sm text-slate-600">Preferences are optional. You can go straight to your matches.</p></div><Link to="/jobs" className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-bold text-white">Back to matches →</Link></div>}
       <section className="profile-hero">
         <div className="hero-copy">
-          <p className="eyebrow">YOUR NEXT MOVE / POWERED BY YOUR EXPERIENCE</p>
-          <h1>Less searching.<br /><span>More right fits.</span></h1>
-          <p className="hero-description">Turn your resume into a focused shortlist of YC startup jobs. Understand each match, track your applications, and prepare your next conversation.</p>
-          <a href="#get-started" className="hero-cta">Build my match profile <span aria-hidden="true">↗</span></a>
-          <p className="hero-caption">No signup. Optional preferences. You stay in control.</p>
+          <h1>Find your next<br /><span>startup role.</span></h1>
+          <p className="hero-description">Match your resume to YC openings, see the skills behind each score, and keep track of the roles worth pursuing.</p>
+          <a href="#get-started" className="hero-cta">Start with my resume <span aria-hidden="true">↓</span></a>
         </div>
-        <div className="match-blueprint" aria-label="Illustrative match preview">
-          <div className="blueprint-header"><span>MATCH BREAKDOWN</span><span className="sample-badge">EXAMPLE</span></div>
-          <div className="blueprint-role"><span className="company-mark" aria-hidden="true">↗</span><div><h2>Full-Stack Engineer</h2><p>Example startup · United States</p></div></div>
-          <div className="evidence-line"><span>01</span><div><strong>Your experience</strong><p>Building web applications and APIs</p></div></div>
-          <div className="evidence-line"><span>02</span><div><strong>Skills in common</strong><div className="evidence-tags"><span>React</span><span>TypeScript</span><span>APIs</span></div></div></div>
-          <div className="evidence-line"><span>03</span><div><strong>Your next step</strong><p>Review the role. Save it. Make your move.</p></div></div>
-          <div className="blueprint-footer">See the evidence behind the match <span aria-hidden="true">→</span></div>
+        <div className="hero-visual">
+          <div className="signal-grid" aria-hidden="true"><i /><i /><i /></div>
+          <div className="match-blueprint" aria-label="Example job match">
+            <div className="blueprint-header"><span>Example match</span><span aria-hidden="true">↗</span></div>
+            <div className="blueprint-role">
+              <div><h2>Full-Stack Engineer</h2><p>Remote · United States</p></div>
+              <span className="blueprint-score">8.4<small>/10</small></span>
+            </div>
+            <meter aria-label="Example match score" min={0} max={10} value={8.4} />
+            <div className="evidence-tags"><span>React</span><span>TypeScript</span><span>APIs</span></div>
+          </div>
         </div>
       </section>
 
-      <section id="get-started" className="grid gap-8 rounded-xl border border-[#dce2ec] bg-white p-5 shadow-[0_20px_60px_-48px_#172b4d] sm:p-8 lg:grid-cols-[0.8fr_1.2fr] lg:p-10">
+      <section id="get-started" className="grid gap-8 rounded-xl border border-[#d6dfd6] bg-white p-5 shadow-[0_20px_60px_-48px_#182523] sm:p-8 lg:grid-cols-[0.8fr_1.2fr] lg:p-10">
         <div>
-          <h2 className="display-font text-3xl leading-tight text-[#172b4d] sm:text-4xl">Start with your resume</h2>
-          <p className="mt-4 max-w-sm text-sm leading-7 text-[#596980]">Upload a PDF to build your profile. You can review what we extracted before exploring recommendations.</p>
-          <div className="mt-8 flex items-start gap-3 rounded-2xl bg-[#f1f5ff] p-4 text-sm text-[#596980]">
-            <span aria-hidden="true" className="text-lg text-[#3859cf]">✦</span>
+          <h2 className="display-font text-3xl leading-tight text-[#182523] sm:text-4xl">Start with your resume</h2>
+          <p className="mt-4 max-w-sm text-sm leading-7 text-[#4f625d]">Upload a PDF to build your profile. You can review what we extracted before exploring recommendations.</p>
+          <div className="mt-8 flex items-start gap-3 rounded-2xl bg-[#edf5e7] p-4 text-sm text-[#4f625d]">
+            <span aria-hidden="true" className="text-lg text-[#075e51]">✦</span>
             <span>PDF only, up to 10 MB. No account or signup required.</span>
           </div>
         </div>
@@ -202,10 +204,10 @@ export default function SetupPage() {
             onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0] ?? null); }}
-            className={`flex min-h-44 flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-5 text-center transition focus-within:ring-4 focus-within:ring-[#c7d2fe] ${status === "uploading" ? "cursor-wait" : "cursor-pointer"} ${dragging ? "border-[#3859cf] bg-[#eef2ff]" : "border-[#b9c8e1] bg-[#f7f9fd] hover:border-[#3859cf] hover:bg-[#f1f5ff]"}`}
+            className={`flex min-h-44 flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-5 text-center transition focus-within:ring-4 focus-within:ring-[#b0d8b8] ${status === "uploading" ? "cursor-wait" : "cursor-pointer"} ${dragging ? "border-[#075e51] bg-[#e6f3e5]" : "border-[#adc3b1] bg-[#f6faf2] hover:border-[#075e51] hover:bg-[#edf5e7]"}`}
           >
-            <span aria-hidden="true" className="grid h-14 w-14 place-items-center rounded-2xl bg-[#e8edff] text-2xl text-[#3859cf]">↑</span>
-            <span className="mt-3 max-w-full break-all text-lg font-bold text-[#172b4d]">{file ? file.name : "Choose a PDF or drop it here"}</span>
+            <span aria-hidden="true" className="grid h-14 w-14 place-items-center rounded-2xl bg-[#deeedb] text-2xl text-[#075e51]">↑</span>
+            <span className="mt-3 max-w-full break-all text-lg font-bold text-[#182523]">{file ? file.name : "Choose a PDF or drop it here"}</span>
             {file && <span className="mt-1 text-sm text-[#64748b]">{(file.size / 1024).toFixed(1)} KB{status !== "uploading" && " · Click to change"}</span>}
             <input
               id="resume-file"
@@ -219,7 +221,7 @@ export default function SetupPage() {
           <button
             type="submit"
             disabled={!file || status === "uploading"}
-            className="min-h-12 rounded-xl bg-[#172b4d] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#274fc5] focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[#3859cf] disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-12 rounded-xl bg-[#182523] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#075e51] focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-[#075e51] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {status === "uploading" ? "Reading your resume…" : "Analyze my resume"}
           </button>
@@ -232,7 +234,7 @@ export default function SetupPage() {
       {hasResume && focusInitial && (!file || status === "done") && (
         <section ref={reviewRef} className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 sm:p-8">
           <div className="mb-6">
-            <p className="text-xs font-bold uppercase tracking-widest text-indigo-700">Your match profile · optional preferences</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-emerald-800">Your match profile · optional preferences</p>
             <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Here’s what we picked up from your resume.</h2>
             <p className="mt-2 text-sm text-slate-600">We use your skills and experience to rank YC jobs. Adjust the suggested roles, or skip this step.</p>
             <div className="mt-4 flex flex-wrap gap-2" aria-label="Detected skills">{(result ?? savedResume)?.parsed.skills.slice(0,12).map(skill => <span key={skill} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{skill}</span>)}</div>
@@ -246,8 +248,8 @@ export default function SetupPage() {
       )}
 
       {result && (
-        <details className="rounded-xl border border-[#dce2ec] bg-white p-5 sm:p-6">
-          <summary className="cursor-pointer text-sm font-semibold text-[#274fc5]">See what we found in your resume</summary>
+        <details className="rounded-xl border border-[#d6dfd6] bg-white p-5 sm:p-6">
+          <summary className="cursor-pointer text-sm font-semibold text-[#075e51]">See what we found in your resume</summary>
           <div className="mt-5"><ParsedView data={result} /></div>
         </details>
       )}

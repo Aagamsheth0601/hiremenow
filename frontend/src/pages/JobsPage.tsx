@@ -19,8 +19,8 @@ import {
 
 const STATUS_OPTIONS: { value: ApplicationStatus; label: string; color: string }[] = [
   { value: "reached_out", label: "Reached out", color: "bg-amber-100 text-amber-800" },
-  { value: "applied", label: "Applied", color: "bg-blue-100 text-blue-800" },
-  { value: "replied", label: "Replied", color: "bg-purple-100 text-purple-800" },
+  { value: "applied", label: "Applied", color: "bg-teal-100 text-teal-900" },
+  { value: "replied", label: "Replied", color: "bg-lime-100 text-lime-900" },
   { value: "rejected", label: "Rejected", color: "bg-zinc-200 text-zinc-700" },
 ];
 
@@ -106,21 +106,27 @@ function VisitorJobsPage() {
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
+  const [countsError, setCountsError] = useState(false);
 
   const jobsRequest = useRef(0);
   const countsRequest = useRef(0);
 
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
     const requestId = ++countsRequest.current;
+    setCounts(null);
+    setCountsError(false);
     try {
       const res = await apiFetch(
         `${BACKEND_URL}/jobs/status-counts?region=${regionParam}`,
       );
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as StatusCounts;
       if (requestId === countsRequest.current) setCounts(data);
     } catch (err) {
-      console.error("failed to load status counts", err);
+      if (requestId === countsRequest.current) {
+        console.error("Could not load job filter counts", err);
+        setCountsError(true);
+      }
     }
   }, []);
 
@@ -133,11 +139,15 @@ function VisitorJobsPage() {
         const res = await apiFetch(
           `${BACKEND_URL}/jobs?limit=200&region=${regionParam}&application_status=${statusParam}`,
         );
-        if (!res.ok) throw new Error(`status ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: Job[] = await res.json();
         if (requestId === jobsRequest.current) setJobs(data);
       } catch (err) {
-        if (requestId === jobsRequest.current) setJobsError(err instanceof Error ? err.message : "Could not load jobs.");
+        if (requestId === jobsRequest.current) {
+          console.error("Could not load matching jobs", err);
+          setJobs([]);
+          setJobsError("Could not load jobs. Try again.");
+        }
       } finally {
         if (requestId === jobsRequest.current) setJobsLoading(false);
       }
@@ -268,22 +278,19 @@ function VisitorJobsPage() {
 
   return (
     <div className="discovery-workspace flex flex-col gap-6">
-      <header className="flex flex-col gap-3">
+      <header className="discovery-header">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-              Discover YC startup jobs
-            </h1>
-            <p className="text-sm text-zinc-600">
-              {jobsLoading ? "Loading your matches…" : `${jobs.length} matches in our collected YC listings`}
-            </p>
-            <p className="text-xs text-zinc-500">
-              Public Y Combinator listings only. Ranked against your resume; this is not the entire job market.
+            <h1>Discover startup jobs</h1>
+            <p className="discovery-intro mt-2 text-sm">
+              Public YC openings ranked against your resume.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <select
-              aria-label="Filter by country"
+            <label className="grid gap-1.5 text-xs font-semibold" htmlFor="job-country">
+              Search country
+              <select
+              id="job-country"
               disabled={countrySaving || prefsLoading}
               value={region}
               onChange={async (event) => {
@@ -306,24 +313,25 @@ function VisitorJobsPage() {
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-100"
             >
               {COUNTRIES.map(country => <option key={country.region} value={country.region}>{country.name}</option>)}
-            </select>
+              </select>
+            </label>
 
           </div>
         </div>
-        <p role="status" className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+        <p role="status" className="source-note" data-overdue={freshnessError || freshness?.stale}>
           {freshnessError ? "Source freshness is unavailable. Listings may be out of date." : !freshness ? "Checking source freshness…" :
             <>YC catalogue: {freshness.last_success_at ? `last refreshed ${timeAgo(freshness.last_success_at)}` : "awaiting its first successful collection"}.
             {freshness.status === "running" ? " Collection is running." : ["failed", "partial", "interrupted"].includes(freshness.status) ? " The latest collection was incomplete; older listings remain available." : ""}
             {freshness.stale && freshness.last_success_at ? " Refresh is overdue." : ""}
-            {" "}Collection runs daily; start times can vary. Verify availability on YC.</>}
+            {" "}Companies are checked in batches on a daily schedule.</>}
         </p>
       </header>
 
-      <section className="rounded-2xl border border-[#dce2ec] bg-white p-4 shadow-sm sm:p-5">
+      <section className="rounded-2xl border border-[#d6dfd6] bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-sm font-bold text-[#172b4d]">Matches shaped by your resume</h2>
-            <p className="mt-1 text-xs leading-5 text-[#596980]">
+            <h2 className="text-sm font-bold text-[#182523]">Match preferences</h2>
+            <p className="mt-1 text-xs leading-5 text-[#4f625d]">
               {prefs?.has_saved ? "Your refinements are applied. You can change them anytime." : "We used the roles and skills found in your resume. Refining your preferences is optional."}
             </p>
           </div>
@@ -332,13 +340,13 @@ function VisitorJobsPage() {
             aria-expanded={refineOpen}
             aria-controls="refine-matches"
             onClick={() => setRefineOpen((open) => !open)}
-            className="min-h-10 shrink-0 rounded-xl border border-[#ccd5e3] bg-[#f1f5ff] px-4 py-2 text-sm font-semibold text-[#274fc5] hover:bg-[#e8edff]"
+            className="min-h-10 shrink-0 rounded-xl border border-[#c8d6c8] bg-[#edf5e7] px-4 py-2 text-sm font-semibold text-[#075e51] hover:bg-[#deeedb]"
           >
             {refineOpen ? "Close refinements" : "Refine my matches"}
           </button>
         </div>
         {refineOpen && prefs && (
-          <div id="refine-matches" className="mt-5 border-t border-[#e1e7ef] pt-5">
+          <div id="refine-matches" className="mt-5 border-t border-[#d6dfd6] pt-5">
             <MatchFocusForm
               initial={prefs}
               submitLabel="Apply refinements"
@@ -364,7 +372,7 @@ function VisitorJobsPage() {
         before pasting into your email or LinkedIn.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="workspace-controls" role="group" aria-label="Filter and sort jobs">
         {STATUS_FILTERS.map((f) => {
           const active = statusFilter === f.value;
           const count = counts?.[f.value];
@@ -372,6 +380,7 @@ function VisitorJobsPage() {
             <button
               key={f.value}
               type="button"
+              aria-pressed={active}
               onClick={() => setStatusFilter(f.value)}
               className={`rounded-full border px-3 py-1 text-xs transition ${
                 active
@@ -402,22 +411,26 @@ function VisitorJobsPage() {
         </button>
       </div>
 
-      {jobsError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Could not load jobs: {jobsError}</p>}
+      {countsError && <p role="status" className="text-sm text-slate-700">Job filter counts are unavailable. You can still use the filters.</p>}
+      {jobsError && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <p role="alert">{jobsError}</p>
+        <button type="button" onClick={() => { void loadJobs(region, statusFilter); void loadCounts(region); }} className="rounded-lg border border-red-300 bg-white px-3 py-2 font-semibold">Retry loading jobs</button>
+      </div>}
 
       {jobsLoading ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Finding jobs that fit your resume…
         </div>
-      ) : pagedJobs.length === 0 && !jobsError ? (
-        <div className="rounded-xl border border-dashed border-[#ccd5e3] bg-white p-10 text-center">
-          <p className="text-sm font-semibold text-[#172b4d]">
+      ) : jobsError ? null : pagedJobs.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-[#c8d6c8] bg-white p-10 text-center">
+          <p className="text-sm font-semibold text-[#182523]">
             {statusFilter !== "active" && statusFilter !== "all"
               ? "No jobs in this list yet."
               : hasLocationOrMode
                 ? "No jobs match your current focus."
                 : "No matching jobs found yet."}
           </p>
-          <p className="mt-2 text-xs text-[#596980]">
+          <p className="mt-2 text-xs text-[#4f625d]">
             {statusFilter !== "active" && statusFilter !== "all"
               ? "Choose All to see your other matches."
               : hasLocationOrMode
@@ -425,7 +438,7 @@ function VisitorJobsPage() {
                 : "Our YC catalogue updates automatically. Try broader match preferences or check back after the next collection."}
           </p>
           {hasLocationOrMode && (statusFilter === "active" || statusFilter === "all") && (
-            <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#172b4d] px-4 text-sm font-semibold text-white hover:bg-[#274fc5]">
+            <button type="button" onClick={() => setRefineOpen(true)} className="mt-4 min-h-10 rounded-xl bg-[#182523] px-4 text-sm font-semibold text-white hover:bg-[#075e51]">
               Refine my matches
             </button>
           )}
@@ -434,20 +447,21 @@ function VisitorJobsPage() {
         <>
           <div className="job-workbench">
             <section className="job-results" aria-label="Matching YC jobs">
-              <div className="results-label">YOUR SHORTLIST STARTS HERE <span>{pagedJobs.length} results</span></div>
+              <div className="results-label">Matches <span>{pagedJobs.length} of {jobs.length}</span></div>
               {pagedJobs.map(job => (
                 <button key={job.id} className={`job-row ${selectedJob?.id === job.id ? "is-selected" : ""}`}
                   aria-pressed={selectedJob?.id === job.id}
                   onClick={() => { setSelectedId(job.id); if (window.innerWidth < 768) document.getElementById("job-detail")?.scrollIntoView({behavior:"smooth",block:"start"}); }}>
-                  <span className="row-company">{job.company_name}<span>{job.is_starred ? "★ Saved" : "YC"}</span></span>
-                  <strong>{job.title}{job.is_closed && " · No longer listed on YC"}</strong>
+                  <span className="row-company">{job.company_name}{job.is_starred && <span>★ Saved</span>}</span>
+                  <strong>{job.title}</strong>
                   <span className="row-location">{job.locations.join(" · ") || "Location not specified"}</span>
-                  <span className="row-bottom"><span>{job.match_score ?? "—"}/10 match</span><span>View role →</span></span>
+                  {job.is_closed && <span className="row-location">No longer listed on YC</span>}
+                  {job.match_score !== undefined && <span className="row-bottom"><span>{job.match_score}/10 match</span><meter aria-hidden="true" min={0} max={10} value={job.match_score} /></span>}
                 </button>
               ))}
             </section>
             <section id="job-detail" className="job-detail" aria-label="Selected job details">
-              <div className="detail-label">THE ROLE, THE FIT, YOUR NEXT STEP</div>
+              <div className="detail-label">Selected role</div>
               <ul>{selectedJob && <JobCard key={selectedJob.id} job={selectedJob} onStatusChange={handleStatusChange} onStarChange={handleStarChange}/>}</ul>
             </section>
           </div>
@@ -537,8 +551,10 @@ function JobCard({
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingStar, setUpdatingStar] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const toggleStar = async () => {
+    setActionError(null);
     const next = !job.is_starred;
     setUpdatingStar(true);
     setJob({ ...job, is_starred: next });
@@ -551,7 +567,8 @@ function JobCard({
       if (!res.ok) throw new Error(`status ${res.status}`);
       onStarChange(job.id, next);
     } catch (err) {
-      console.error("star toggle failed", err);
+      console.error("Could not update saved job", err);
+      setActionError("Could not update this saved job. Try again.");
       setJob({ ...job, is_starred: !next });
     } finally {
       setUpdatingStar(false);
@@ -559,6 +576,7 @@ function JobCard({
   };
 
   const setStatus = async (newStatus: ApplicationStatus | null) => {
+    setActionError(null);
     setUpdatingStatus(true);
     try {
       const res = await apiFetch(`${BACKEND_URL}/jobs/${job.id}/status`, {
@@ -578,7 +596,8 @@ function JobCard({
       });
       onStatusChange(job.id, data.application_status);
     } catch (err) {
-      console.error("status update failed", err);
+      console.error("Could not update application status", err);
+      setActionError("Could not update the application status. Try again.");
     } finally {
       setUpdatingStatus(false);
     }
@@ -587,12 +606,13 @@ function JobCard({
   const meta = statusMeta(job.application_status);
 
   const enrich = async () => {
+    setActionError(null);
     setEnriching(true);
     try {
       const res = await apiFetch(`${BACKEND_URL}/jobs/${job.id}/enrich`, {
         method: "POST",
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { founders: typeof job.founders; contact_emails: string[] } =
         await res.json();
       setJob({
@@ -601,7 +621,8 @@ function JobCard({
         contact_emails: data.contact_emails,
       });
     } catch (err) {
-      console.error("enrich failed", err);
+      console.error("Could not look up job contacts", err);
+      setActionError("Could not look up contacts. Try again.");
     } finally {
       setEnriching(false);
     }
@@ -628,7 +649,7 @@ function JobCard({
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? `Draft failed (${res.status})`);
+        throw new Error(typeof body.detail === "string" ? body.detail : `Draft failed (${res.status}). Try again.`);
       }
       const data = (await res.json()) as EmailDraft | LinkedInDraft;
       setDraft({ status: "ready", kind, draft: data });
@@ -645,12 +666,14 @@ function JobCard({
   };
 
   const copy = async (text: string, label: "subject" | "body" | "message") => {
+    setActionError(null);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(label);
       setTimeout(() => setCopied(null), 1500);
     } catch (err) {
-      console.error("clipboard write failed", err);
+      console.error("Could not copy draft", err);
+      setActionError("Could not copy the draft. You can select and copy the text manually.");
     }
   };
 
@@ -672,7 +695,9 @@ function JobCard({
     try {
       const response = await apiFetch(`${BACKEND_URL}/resumes/latest/pdf`);
       if (!response.ok) throw new Error("Could not download your resume.");
-      const objectUrl = URL.createObjectURL(await response.blob());
+      const pdf = await response.blob();
+      if (pdf.type !== "application/pdf" || pdf.size === 0) throw new Error("The server returned an invalid PDF.");
+      const objectUrl = URL.createObjectURL(pdf);
       const link = document.createElement("a");
       link.href = objectUrl;
       link.download = "resume.pdf";
@@ -762,7 +787,7 @@ function JobCard({
                 )) : <span className="text-xs text-[#6d8074]">No exact skill overlap found in the extracted text.</span>}
               </div>
               <details className="mt-3 text-sm">
-                <summary className="cursor-pointer text-xs font-semibold text-[#274fc5] underline-offset-2 hover:underline">See match details</summary>
+                <summary className="cursor-pointer text-xs font-semibold text-[#075e51] underline-offset-2 hover:underline">See match details</summary>
               <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate-700">
                 {job.match_details.matched_target_roles.length > 0 && (
                   <p>Role match: {job.match_details.matched_target_roles.join(", ")}</p>
@@ -860,7 +885,7 @@ function JobCard({
               className="relative rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {draft.status === "loading" && draft.kind === "email" ? (
-                <span className="block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
+                <span role="status" className="block h-5 w-5 text-center" aria-label="Generating email draft">…</span>
               ) : (
                 <GmailIcon className="h-5 w-5" />
               )}
@@ -880,7 +905,7 @@ function JobCard({
               className="relative rounded-md border border-zinc-200 p-1.5 transition hover:border-zinc-400 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {draft.status === "loading" && draft.kind === "linkedin" ? (
-                <span className="block h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700" />
+                <span role="status" className="block h-5 w-5 text-center" aria-label="Generating LinkedIn draft">…</span>
               ) : (
                 <LinkedInIcon className="h-5 w-5" />
               )}
@@ -908,8 +933,9 @@ function JobCard({
         </div>
       </div>
 
+      {actionError && <p role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{actionError}</p>}
       {draft.status === "error" && (
-        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+        <p role="alert" className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
           {draft.message}
         </p>
       )}
