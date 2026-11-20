@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 
 import MatchFocusForm from "../components/MatchFocusForm";
+import { clearJobCache } from "../lib/jobCache";
 
 import {
   apiFetch,
@@ -31,6 +32,9 @@ export default function SetupPage() {
   const reviewRef = useRef<HTMLElement>(null);
   const uploadStarted = useRef(false);
   const uploadSucceeded = useRef(false);
+  useEffect(() => {
+    if (location.hash === "#get-started") document.getElementById("get-started")?.scrollIntoView();
+  }, [location.hash]);
 
   const chooseFile = (next: File | null) => {
     if (status === "uploading") return;
@@ -114,6 +118,7 @@ export default function SetupPage() {
     try {
       const response = await apiFetch(`${BACKEND_URL}/preferences`, { method: "DELETE" });
       if (!response.ok) throw new Error("Could not skip preferences. Please try again.");
+      clearJobCache();
       sessionStorage.removeItem("hiremenow.jobsAutoSearch.india");
       sessionStorage.removeItem("hiremenow.jobsAutoSearch.us");
       navigate("/jobs");
@@ -149,6 +154,7 @@ export default function SetupPage() {
       }
 
       const data: UploadResponse = await res.json();
+      clearJobCache();
       uploadSucceeded.current = true;
       setResult(data);
       setSavedResume(data);

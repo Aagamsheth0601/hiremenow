@@ -2,6 +2,7 @@ import { COUNTRIES, locationRegion } from "../lib/location";
 import { useEffect, useState } from "react";
 
 import { apiFetch, BACKEND_URL, type Preferences } from "../lib/api";
+import { clearJobCache } from "../lib/jobCache";
 
 type Props = {
   initial: Preferences;
@@ -46,6 +47,7 @@ export default function MatchFocusForm({ initial, submitLabel, onSaved }: Props)
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail ?? `Could not save your match focus (${response.status}).`);
       }
+      clearJobCache();
       await onSaved(await response.json() as Preferences);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save your match focus.");

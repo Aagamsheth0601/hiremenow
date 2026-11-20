@@ -1,3 +1,5 @@
+import { clearJobCache } from "./jobCache";
+
 export const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:8000";
 
@@ -6,6 +8,11 @@ let tokenPromise: Promise<string> | null = null;
 
 export function hasVisitorSession(): boolean {
   return Boolean(localStorage.getItem(TOKEN_KEY));
+}
+
+export function visitorCacheScope(): string | null {
+  // Identify the owner without copying the full bearer token into the cache.
+  return localStorage.getItem(TOKEN_KEY)?.slice(-20) ?? null;
 }
 
 // Bound network waits so a sleeping or unreachable API cannot leave the UI
@@ -55,7 +62,10 @@ export async function apiFetch(url: string, init: RequestInit = {}): Promise<Res
   if (response.status !== 401) return response;
 
   // The server may have started with a new database. Create a fresh session.
-  localStorage.removeItem(TOKEN_KEY);
+  if (localStorage.getItem(TOKEN_KEY) === token) {
+    clearJobCache();
+    localStorage.removeItem(TOKEN_KEY);
+  }
   const newToken = await visitorToken();
   headers.set("Authorization", `Bearer ${newToken}`);
   return timedFetch(url, { ...init, headers });

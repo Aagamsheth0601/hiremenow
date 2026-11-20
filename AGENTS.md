@@ -2,6 +2,8 @@
 
 ## Bug log / gotchas
 
+- Discover used a green bar for every fit score and kept the selected card's old data after a refresh. Use shared score thresholds for the list and selected card, and sync the selected card when fresh results arrive. The first build rejected the `inert` prop with the current React types. Cached cards now appear immediately and job actions appear after profile verification.
+
 - Scheduled YC refreshes returned partial results after hundreds of failed requests. Run 44621217852 showed repeated HTTP 429s during job detail fetching. The collector now stops on the first 429 across both regions, saves work already processed, and reports incomplete collection without advancing the last successful refresh.
 - Run 44786789213 also hit HTTP 429 during discovery, before any jobs were saved. The daily incremental collector bounds requests, rotates known companies, batches listing checks, and downloads descriptions only for jobs awaiting detail. Two complete checks at least 20 hours apart are required to hide a missing listing. A bounded live smoke test in isolated SQLite saved 3 India and 10 US jobs with zero errors. Production still needs verification.
 - Run 44789786279 completed India with 189 listings and failed the US refresh with a generic exception. Production contains legacy URL aliases for 11 stable job IDs. A local regression covers the unique-URL collision when the current URL already belongs to another row. Prefer the current URL's owner while preserving both rows and visitor history. Unexpected failures now log the exception type and, for PostgreSQL, the SQLSTATE without connection or exception payloads.

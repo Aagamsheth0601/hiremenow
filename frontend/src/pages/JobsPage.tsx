@@ -1,11 +1,13 @@
 import { COUNTRIES, locationRegion } from "../lib/location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import MatchFocusForm from "../components/MatchFocusForm";
+import { clearJobCache, readJobCache, saveJobCache } from "../lib/jobCache";
 
 import {
   apiFetch,
   hasVisitorSession,
+  visitorCacheScope,
   BACKEND_URL,
   type ApplicationStatus,
   type EmailDraft,
@@ -82,26 +84,48 @@ function timeAgo(iso: string): string {
 }
 
 export default function JobsPage() {
-  // A browser without a token cannot own a resume. Do not wait for the API.
-  if (!hasVisitorSession()) return <Navigate to="/?resumeRequired=1#get-started" replace />;
+  if (!hasVisitorSession()) return <ResumeGate />;
   return <VisitorJobsPage />;
 }
 
+function ResumeGate() {
+  return <section className="rounded-2xl border border-[#d6dfd6] bg-white p-6 sm:p-10" aria-labelledby="resume-gate">
+    <h1 id="resume-gate" className="display-font text-3xl text-[#182523]">Upload your résumé to see recommendations</h1>
+    <p className="mt-3 text-sm text-[#4f625d]">We use your skills and experience to rank YC openings for you.</p>
+    <Link to="/#get-started" className="hero-cta">Upload résumé</Link>
+  </section>;
+}
+
+function matchFit(score: number | undefined) {
+  if (score === undefined) return { level: "unknown", label: "Score unavailable", badge: "bg-zinc-100 text-zinc-700" };
+  if (score > 7.5) return { level: "strong", label: "Strong fit", badge: "bg-[#e4f3e7] text-[#246342]" };
+  if (score >= 5) return { level: "medium", label: "Medium fit", badge: "bg-[#fff1d9] text-[#805315]" };
+  return { level: "low", label: "Low fit", badge: "bg-[#fbe8e6] text-[#8b2924]" };
+}
+
+function matchProfileKey(resumeKey: string, prefs: Preferences | null) {
+  return JSON.stringify([resumeKey, prefs?.updated_at, prefs?.target_roles, prefs?.locations, prefs?.work_modes,
+    prefs?.seniority, prefs?.company_sizes, prefs?.needs_visa_sponsorship]);
+}
+
 function VisitorJobsPage() {
+  const [initialCache] = useState(() => readJobCache(visitorCacheScope()));
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(true);
   const [hasResume, setHasResume] = useState(false);
+  const [resumeKey, setResumeKey] = useState("");
   const [profileError, setProfileError] = useState<string | null>(null);
   const [refineOpen, setRefineOpen] = useState(false);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobs, setJobs] = useState<Job[]>(initialCache?.jobs ?? []);
+  const [jobsLoading, setJobsLoading] = useState(!initialCache);
+  const [showingCache, setShowingCache] = useState(Boolean(initialCache));
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<{status:string; last_success_at:string|null; stale:boolean}|null>(null);
   const [freshnessError, setFreshnessError] = useState(false);
   const [countrySaving, setCountrySaving] = useState(false);
   const [countryError, setCountryError] = useState<string | null>(null);
-  const [region, setRegion] = useState<"india" | "us">("india");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [region, setRegion] = useState<"india" | "us">(initialCache?.region ?? "india");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialCache?.filter ?? "active");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -110,6 +134,7 @@ function VisitorJobsPage() {
 
   const jobsRequest = useRef(0);
   const countsRequest = useRef(0);
+  const profileKey = matchProfileKey(resumeKey, prefs);
 
   const loadCounts = useCallback(async (regionParam: "india" | "us") => {
     const requestId = ++countsRequest.current;
@@ -133,7 +158,13 @@ function VisitorJobsPage() {
   const loadJobs = useCallback(
     async (regionParam: "india" | "us", statusParam: StatusFilter) => {
       const requestId = ++jobsRequest.current;
-      setJobsLoading(true);
+      const scope = visitorCacheScope();
+      const cache = readJobCache(scope);
+      const saved = cache?.profile === profileKey && cache.region === regionParam && cache.filter === statusParam
+        ? cache : null;
+      setJobs(saved?.jobs ?? []);
+      setShowingCache(Boolean(saved));
+      setJobsLoading(!saved);
       setJobsError(null);
       try {
         const res = await apiFetch(
@@ -141,22 +172,36 @@ function VisitorJobsPage() {
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: Job[] = await res.json();
-        if (requestId === jobsRequest.current) setJobs(data);
+        if (requestId === jobsRequest.current) {
+          if (scope !== visitorCacheScope()) {
+            setHasResume(false);
+            return;
+          }
+          setJobs(data);
+          setShowingCache(false);
+          if (scope) saveJobCache({ scope, profile: profileKey, region: regionParam, filter: statusParam, jobs: data });
+        }
       } catch (err) {
         if (requestId === jobsRequest.current) {
           console.error("Could not load matching jobs", err);
-          setJobs([]);
-          setJobsError("Could not load jobs. Try again.");
+          if (scope !== visitorCacheScope()) {
+            setHasResume(false);
+            return;
+          }
+          setJobsError(saved ? "Showing your last results. Refresh failed." : "Could not load jobs. Try again.");
         }
       } finally {
         if (requestId === jobsRequest.current) setJobsLoading(false);
       }
     },
-    [],
+    [profileKey],
   );
 
   const handleStatusChange = useCallback(
     (jobId: number, newStatus: ApplicationStatus | null) => {
+      clearJobCache();
+      ++jobsRequest.current;
+      setShowingCache(false);
       const matchesFilter =
         statusFilter === "all" ||
         statusFilter === "starred" ||
@@ -183,6 +228,9 @@ function VisitorJobsPage() {
 
   const handleStarChange = useCallback(
     (jobId: number, isStarred: boolean) => {
+      clearJobCache();
+      ++jobsRequest.current;
+      setShowingCache(false);
       setJobs((prev) =>
         statusFilter === "starred" && !isStarred
           ? prev.filter((j) => j.id !== jobId)
@@ -208,6 +256,16 @@ function VisitorJobsPage() {
         if (cancelled) return;
         setPrefs(data);
         setHasResume(resumes.length > 0);
+        const resume = resumes[0];
+        const nextResumeKey = resume ? `${resume.id}:${resume.uploaded_at}` : "";
+        if (initialCache && (initialCache.scope !== visitorCacheScope()
+            || initialCache.profile !== matchProfileKey(nextResumeKey, data))) {
+          clearJobCache();
+          setJobs([]);
+          setJobsLoading(true);
+          setShowingCache(false);
+        }
+        setResumeKey(nextResumeKey);
         const preferredRegion = locationRegion(data?.locations[0] ?? "");
         const homeRegion = locationRegion(resumes[0]?.parsed.contact.location ?? "");
         setRegion(preferredRegion ?? homeRegion ?? "india");
@@ -221,7 +279,7 @@ function VisitorJobsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialCache]);
 
   useEffect(() => {
     if (prefsLoading || !hasResume) return;
@@ -231,7 +289,7 @@ function VisitorJobsPage() {
 
   useEffect(() => {
     if (!prefsLoading && hasResume) loadCounts(region);
-  }, [loadCounts, region, prefsLoading, hasResume]);
+  }, [loadCounts, region, profileKey, prefsLoading, hasResume]);
 
   const JOBS_PER_PAGE = 30;
 
@@ -260,7 +318,7 @@ function VisitorJobsPage() {
 
   const selectedJob = pagedJobs.find(job => job.id === selectedId) ?? pagedJobs[0];
 
-  if (prefsLoading) {
+  if (prefsLoading && !initialCache) {
     return (
       <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
         Loading…
@@ -272,7 +330,7 @@ function VisitorJobsPage() {
     return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">{profileError}</div>;
   }
 
-  if (!hasResume) return <Navigate to="/?resumeRequired=1#get-started" replace />;
+  if (!prefsLoading && !hasResume) return <ResumeGate />;
 
   const hasLocationOrMode = Boolean(prefs?.locations.length || prefs?.work_modes.length);
 
@@ -291,7 +349,7 @@ function VisitorJobsPage() {
               Search country
               <select
               id="job-country"
-              disabled={countrySaving || prefsLoading}
+              disabled={countrySaving || prefsLoading || !prefs}
               value={region}
               onChange={async (event) => {
                 const nextRegion = event.target.value as "india" | "us";
@@ -304,6 +362,7 @@ function VisitorJobsPage() {
                     body: JSON.stringify({ ...prefs, locations: [COUNTRIES.find(country => country.region === nextRegion)!.name] }),
                   });
                   if (!response.ok) throw new Error("Could not save your country. Please try again.");
+                  clearJobCache();
                   setPrefs(await response.json() as Preferences);
                   setRegion(nextRegion);
                 } catch (error) {
@@ -338,6 +397,7 @@ function VisitorJobsPage() {
           <button
             type="button"
             aria-expanded={refineOpen}
+            disabled={prefsLoading || !prefs}
             aria-controls="refine-matches"
             onClick={() => setRefineOpen((open) => !open)}
             className="min-h-10 shrink-0 rounded-xl border border-[#c8d6c8] bg-[#edf5e7] px-4 py-2 text-sm font-semibold text-[#075e51] hover:bg-[#deeedb]"
@@ -350,16 +410,13 @@ function VisitorJobsPage() {
             <MatchFocusForm
               initial={prefs}
               submitLabel="Apply refinements"
-              onSaved={async (updated) => {
+              onSaved={(updated) => {
+                clearJobCache();
                 setPrefs(updated);
                 setRefineOpen(false);
                 setPage(0);
                 const nextRegion = locationRegion(updated.locations[0] ?? "") ?? region;
                 setRegion(nextRegion);
-                if (nextRegion === region) {
-                  await loadJobs(nextRegion, statusFilter);
-                  await loadCounts(nextRegion);
-                }
               }}
             />
           </div>
@@ -381,6 +438,7 @@ function VisitorJobsPage() {
               key={f.value}
               type="button"
               aria-pressed={active}
+              disabled={prefsLoading}
               onClick={() => setStatusFilter(f.value)}
               className={`rounded-full border px-3 py-1 text-xs transition ${
                 active
@@ -412,6 +470,7 @@ function VisitorJobsPage() {
       </div>
 
       {countsError && <p role="status" className="text-sm text-slate-700">Job filter counts are unavailable. You can still use the filters.</p>}
+      {showingCache && !jobsError && <p role="status" className="text-sm text-slate-700">Showing your last results while we check for updates.</p>}
       {jobsError && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
         <p role="alert">{jobsError}</p>
         <button type="button" onClick={() => { void loadJobs(region, statusFilter); void loadCounts(region); }} className="rounded-lg border border-red-300 bg-white px-3 py-2 font-semibold">Retry loading jobs</button>
@@ -421,7 +480,7 @@ function VisitorJobsPage() {
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
           Finding jobs that fit your resume…
         </div>
-      ) : jobsError ? null : pagedJobs.length === 0 ? (
+      ) : jobsError && !pagedJobs.length ? null : pagedJobs.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[#c8d6c8] bg-white p-10 text-center">
           <p className="text-sm font-semibold text-[#182523]">
             {statusFilter !== "active" && statusFilter !== "all"
@@ -456,13 +515,17 @@ function VisitorJobsPage() {
                   <strong>{job.title}</strong>
                   <span className="row-location">{job.locations.join(" · ") || "Location not specified"}</span>
                   {job.is_closed && <span className="row-location">No longer listed on YC</span>}
-                  {job.match_score !== undefined && <span className="row-bottom"><span>{job.match_score}/10 match</span><meter aria-hidden="true" min={0} max={10} value={job.match_score} /></span>}
+                  {job.match_score !== undefined && <span className="row-bottom">
+                    <span>{job.match_score}/10 · {matchFit(job.match_score).label}</span>
+                    <meter aria-hidden="true" data-fit={matchFit(job.match_score).level} min={0} max={10} value={job.match_score} />
+                  </span>}
                 </button>
               ))}
             </section>
             <section id="job-detail" className="job-detail" aria-label="Selected job details">
               <div className="detail-label">Selected role</div>
-              <ul>{selectedJob && <JobCard key={selectedJob.id} job={selectedJob} onStatusChange={handleStatusChange} onStarChange={handleStarChange}/>}</ul>
+              {prefsLoading ? <p className="p-5 text-sm text-slate-700">Checking your profile before opening job details…</p> :
+                <ul>{selectedJob && <JobCard key={selectedJob.id} job={selectedJob} onStatusChange={handleStatusChange} onStarChange={handleStarChange}/>}</ul>}
             </section>
           </div>
 
@@ -544,6 +607,7 @@ function JobCard({
   onStarChange: (jobId: number, isStarred: boolean) => void;
 }) {
   const [job, setJob] = useState(initialJob);
+  useEffect(() => { setJob(initialJob); }, [initialJob]);
   const [draft, setDraft] = useState<DraftState>({ status: "idle" });
   const [copied, setCopied] = useState<"subject" | "body" | "message" | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -710,12 +774,7 @@ function JobCard({
 
   const emailDraft = draft.status === "ready" && draft.draft.kind === "email" ? draft.draft : null;
   const linkedInDraft = draft.status === "ready" && draft.draft.kind === "linkedin" ? draft.draft : null;
-  const fitLevel = (job.match_score ?? 0) >= 7 ? "strong" : (job.match_score ?? 0) >= 4 ? "medium" : "low";
-  const fitStyle = {
-    strong: { background: "bg-[#e4f3e7]", badge: "bg-[#e4f3e7] text-[#246342]", label: "Strong fit" },
-    medium: { background: "bg-[#fff1d9]", badge: "bg-[#fff1d9] text-[#805315]", label: "Medium fit" },
-    low: { background: "bg-[#e9eef3]", badge: "bg-[#e9eef3] text-[#486176]", label: "Low fit" },
-  }[fitLevel];
+  const fitStyle = matchFit(job.match_score);
 
   return (
     <li className="selected-job-card">
