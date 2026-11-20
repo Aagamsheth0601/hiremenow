@@ -6,6 +6,7 @@ import MatchFocusForm from "../components/MatchFocusForm";
 import {
   apiFetch,
   BACKEND_URL,
+  hasVisitorSession,
   type Preferences,
   type UploadResponse,
 } from "../lib/api";
@@ -19,6 +20,7 @@ export default function SetupPage() {
     "idle"
   );
   const [error, setError] = useState<string | null>(null);
+  const [skipError, setSkipError] = useState<string | null>(null);
   const [savedResume, setSavedResume] = useState<UploadResponse | null>(null);
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [hasResume, setHasResume] = useState<boolean | null>(null);
@@ -27,8 +29,11 @@ export default function SetupPage() {
   const [dragging, setDragging] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const reviewRef = useRef<HTMLElement>(null);
+  const uploadStarted = useRef(false);
+  const uploadSucceeded = useRef(false);
 
   const chooseFile = (next: File | null) => {
+    if (status === "uploading") return;
     setResult(null);
     if (!next) {
       setFile(null);
@@ -53,6 +58,10 @@ export default function SetupPage() {
   };
 
   useEffect(() => {
+    if (!hasVisitorSession()) {
+      setHasResume(false);
+      return;
+    }
     let cancelled = false;
     Promise.all([
       apiFetch(`${BACKEND_URL}/resumes`),
@@ -63,14 +72,13 @@ export default function SetupPage() {
         return [await resumesResponse.json() as UploadResponse[], await preferencesResponse.json() as Preferences] as const;
       })
       .then(([resumes, savedPreferences]) => {
-        if (cancelled) return;
+        if (cancelled || uploadSucceeded.current) return;
         setHasResume(resumes.length > 0);
         setSavedResume(resumes[0] ?? null);
         setPreferences(savedPreferences);
       })
       .catch(() => {
-        if (!cancelled) {
-          setHasResume(false);
+        if (!cancelled && !uploadStarted.current) {
           setConnectionError(true);
         }
       });
@@ -102,7 +110,7 @@ export default function SetupPage() {
 
   const skipPreferences = async () => {
     setSkipping(true);
-    setError(null);
+    setSkipError(null);
     try {
       const response = await apiFetch(`${BACKEND_URL}/preferences`, { method: "DELETE" });
       if (!response.ok) throw new Error("Could not skip preferences. Please try again.");
@@ -110,7 +118,7 @@ export default function SetupPage() {
       sessionStorage.removeItem("hiremenow.jobsAutoSearch.us");
       navigate("/jobs");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not skip preferences.");
+      setSkipError(cause instanceof Error ? cause.message : "Could not skip preferences.");
     } finally {
       setSkipping(false);
     }
@@ -118,8 +126,10 @@ export default function SetupPage() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || status === "uploading") return;
 
+    uploadStarted.current = true;
+    setConnectionError(false);
     setStatus("uploading");
     setError(null);
     setResult(null);
@@ -135,11 +145,13 @@ export default function SetupPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? `Upload failed (${res.status})`);
+        throw new Error(typeof body.detail === "string" ? body.detail : `Upload failed (${res.status}). Try again.`);
       }
 
       const data: UploadResponse = await res.json();
+      uploadSucceeded.current = true;
       setResult(data);
+      setSavedResume(data);
       setStatus("done");
       setHasResume(true);
       setPreferences(null);
@@ -147,7 +159,8 @@ export default function SetupPage() {
       sessionStorage.removeItem("hiremenow.jobsAutoSearch.us");
       setConnectionError(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof TypeError ? "Couldn’t reach the service. Please try again." :
+        err instanceof Error ? err.message : "Upload failed. Please try again.");
       setStatus("error");
     }
   };
@@ -173,34 +186,32 @@ export default function SetupPage() {
           <div className="blueprint-footer">See the evidence behind the match <span aria-hidden="true">→</span></div>
         </div>
       </section>
-      <div className="workflow-strip" aria-label="How it works"><div><span>01</span><strong>Build your profile</strong><p>Start with your resume</p></div><div><span>02</span><strong>Find your fit</strong><p>Compare roles and match evidence</p></div><div><span>03</span><strong>Make your move</strong><p>Track progress and draft outreach</p></div></div>
 
       <section id="get-started" className="grid gap-8 rounded-xl border border-[#dce2ec] bg-white p-5 shadow-[0_20px_60px_-48px_#172b4d] sm:p-8 lg:grid-cols-[0.8fr_1.2fr] lg:p-10">
         <div>
-          <span className="text-xs font-bold uppercase tracking-[0.18em] text-[#3859cf]">01 / Get started</span>
-          <h2 className="display-font mt-4 text-4xl leading-tight text-[#172b4d]">Start with your resume.</h2>
+          <h2 className="display-font text-3xl leading-tight text-[#172b4d] sm:text-4xl">Start with your resume</h2>
           <p className="mt-4 max-w-sm text-sm leading-7 text-[#596980]">Upload a PDF to build your profile. You can review what we extracted before exploring recommendations.</p>
           <div className="mt-8 flex items-start gap-3 rounded-2xl bg-[#f1f5ff] p-4 text-sm text-[#596980]">
             <span aria-hidden="true" className="text-lg text-[#3859cf]">✦</span>
             <span>PDF only, up to 10 MB. No account or signup required.</span>
           </div>
         </div>
-        <form onSubmit={onSubmit} className="flex flex-col justify-center gap-4">
+        <form onSubmit={onSubmit} className="min-w-0 flex flex-col justify-center gap-3">
           <label
             htmlFor="resume-file"
             onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0] ?? null); }}
-            className={`flex min-h-64 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition focus-within:ring-4 focus-within:ring-[#c7d2fe] ${dragging ? "border-[#3859cf] bg-[#eef2ff]" : "border-[#b9c8e1] bg-[#f7f9fd] hover:border-[#3859cf] hover:bg-[#f1f5ff]"}`}
+            className={`flex min-h-44 flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-5 text-center transition focus-within:ring-4 focus-within:ring-[#c7d2fe] ${status === "uploading" ? "cursor-wait" : "cursor-pointer"} ${dragging ? "border-[#3859cf] bg-[#eef2ff]" : "border-[#b9c8e1] bg-[#f7f9fd] hover:border-[#3859cf] hover:bg-[#f1f5ff]"}`}
           >
             <span aria-hidden="true" className="grid h-14 w-14 place-items-center rounded-2xl bg-[#e8edff] text-2xl text-[#3859cf]">↑</span>
-            <span className="mt-5 text-lg font-bold text-[#172b4d]">{file ? file.name : "Drop your PDF here"}</span>
-            <span className="mt-1 text-sm text-[#64748b]">{file ? `${(file.size / 1024).toFixed(1)} KB · Click to change` : "or click to browse your files"}</span>
-            <span className="mt-5 rounded-full border border-[#b9c8e1] bg-white px-5 py-2 text-sm font-bold text-[#3859cf]">Choose PDF</span>
+            <span className="mt-3 max-w-full break-all text-lg font-bold text-[#172b4d]">{file ? file.name : "Choose a PDF or drop it here"}</span>
+            {file && <span className="mt-1 text-sm text-[#64748b]">{(file.size / 1024).toFixed(1)} KB{status !== "uploading" && " · Click to change"}</span>}
             <input
               id="resume-file"
               type="file"
               accept=".pdf,application/pdf"
+              disabled={status === "uploading"}
               onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
               className="sr-only"
             />
@@ -212,20 +223,11 @@ export default function SetupPage() {
           >
             {status === "uploading" ? "Reading your resume…" : "Analyze my resume"}
           </button>
+          {status === "uploading" && <p role="status" className="text-sm text-slate-600">The service may take a moment to start after being idle.</p>}
+          {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+          {connectionError && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">We couldn’t load your saved profile. You can still try uploading a PDF.</p>}
         </form>
       </section>
-
-      {error && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {connectionError && (
-        <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          The recommendation service is unavailable right now. You can explore this page, but uploading a resume requires the service to be running.
-        </div>
-      )}
 
       {hasResume && focusInitial && (!file || status === "done") && (
         <section ref={reviewRef} className="scroll-mt-24 rounded-xl border border-slate-200 bg-white p-5 sm:p-8">
@@ -239,6 +241,7 @@ export default function SetupPage() {
           <button type="button" onClick={skipPreferences} disabled={skipping} className="mt-5 inline-flex min-h-12 items-center rounded-lg border-2 border-slate-800 px-5 py-3 text-sm font-extrabold text-slate-900 hover:bg-slate-100 disabled:opacity-50">
             {skipping ? "Opening jobs…" : "Skip preferences — Show my matches"}
           </button>
+          {skipError && <p role="alert" className="mt-3 text-sm text-red-800">{skipError}</p>}
         </section>
       )}
 

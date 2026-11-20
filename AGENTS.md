@@ -3,6 +3,7 @@
 ## Bug log / gotchas
 
 - Scheduled YC refreshes returned partial results after hundreds of failed requests. Run 44621217852 showed repeated HTTP 429s during job detail fetching. The collector now stops on the first 429 across both regions, saves work already processed, and reports incomplete collection without advancing the last successful refresh.
+- The upload page could show a saved-profile request failure as a service outage during an upload. First-time visitors now skip account reads, and upload feedback appears in the form. On an initial build attempt the sandbox denied linking the installed dependencies, leaving TypeScript unavailable. The build passed after reusing the installation with the identical lockfile outside the sandbox. Playwright verified an upload failure and retry at 390, 768, and 1280px. Production accepted a synthetic PDF in 2.36 seconds before the change.
 
 | Symptom | Root cause | Fix / status |
 | --- | --- | --- |
